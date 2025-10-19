@@ -296,7 +296,7 @@
                 'red': 'text-red-600',
                 'orange': 'text-orange-600'
             };
-            status.innerHTML = `<i class="fas fa-circle ${colors[color]} online mr-1"></i>${text}`;
+            status.innerHTML = `<i class="fas fa-circle ${colors[color] || 'text-gray-400'} ${color === 'green' ? 'online' : ''} mr-1"></i>${text}`;
         }
 
         function connectToPeer() {
@@ -312,7 +312,8 @@
             }
 
             const conn = peer.connect(remotePeerId, {
-                metadata: { deviceName: myDeviceName }
+                metadata: { deviceName: myDeviceName },
+                reliable: true
             });
             handleConnection(conn);
         }
@@ -325,18 +326,11 @@
             });
 
             conn.on('data', (data) => {
-                // CRITICAL FIX: Check data type FIRST before accessing properties
-                const isArrayBuffer = data instanceof ArrayBuffer;
-                const isBlob = data instanceof Blob;
+                console.log(`Connection ${conn.peer}: Received data`, data);
                 
-                console.log('Data received - Type:', isArrayBuffer ? 'ArrayBuffer' : isBlob ? 'Blob' : 'Object', 'Size:', isArrayBuffer ? data.byteLength : isBlob ? data.size : 'N/A');
-                
-                // Binary chunk data
-                if (isArrayBuffer || isBlob) {
-                    receiveChunk(data, conn);
-                }
-                // JSON message data
-                else if (data && typeof data === 'object') {
+                // Check if it's a JSON message (object with type property)
+                if (data && typeof data === 'object' && data.type) {
+                    console.log(`Connection ${conn.peer}: Received message of type ${data.type}`);
                     if (data.type === 'file-request') {
                         handleFileRequest(data, conn);
                     } else if (data.type === 'file-accepted') {
@@ -344,6 +338,10 @@
                     } else if (data.type === 'file-rejected') {
                         handleFileRejected(data, conn);
                     }
+                } 
+                // Otherwise it's a binary chunk
+                else if (data instanceof ArrayBuffer || data instanceof Blob) {
+                    receiveChunk(data, conn);
                 }
             });
 
@@ -425,7 +423,6 @@
             
             pendingSendFile = file;
             
-            console.log('Sending file request for:', file.name);
             currentConnection.send({
                 type: 'file-request',
                 name: file.name,
@@ -438,26 +435,33 @@
         }
 
         function handleFileAccepted(data, conn) {
-            console.log('✅ File ACCEPTED by receiver!');
+            console.log('File accepted by receiver!', data);
             if (!pendingSendFile) {
-                console.log('❌ No pending file to send');
+                console.error('Received file acceptance, but no file is pending to be sent.');
+                showNotification('Error: Acceptance received with no pending file.', 'error');
                 return;
             }
             
-            // Start sending immediately
-            sendFile(pendingSendFile);
+            console.log('Starting file transfer for:', pendingSendFile.name);
+            sendFile(pendingSendFile, conn);
         }
 
         function handleFileRejected(data, conn) {
-            console.log('❌ File REJECTED by receiver');
+            console.log('File rejected by receiver');
+            if (!pendingSendFile) return;
+            
             hideTransferProgress();
             showNotification('File transfer rejected by recipient', 'error');
             pendingSendFile = null;
         }
 
-        function sendFile(file) {
-            console.log('📤 Starting file send:', file.name, 'Size:', file.size);
+        function sendFile(file, connection) {
+            if (!file || !connection) {
+                console.error("sendFile called with invalid arguments:", file, connection);
+                return;
+            }
             
+            console.log(`Starting to send file: ${file.name} over connection ${connection.peer}`);
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let chunkIndex = 0;
             let startTime = Date.now();
@@ -465,8 +469,6 @@
 
             const sendNextChunk = () => {
                 if (chunkIndex >= totalChunks) {
-                    console.log('✅ All chunks sent!');
-                    hideTransferProgress();
                     addToHistory('Sent: ' + file.name, 'send');
                     showNotification('File sent successfully!', 'success');
                     pendingSendFile = null;
@@ -480,24 +482,22 @@
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
-                        currentConnection.send(e.target.result);
-                        console.log(`Sent chunk ${chunkIndex + 1}/${totalChunks}`);
+                        connection.send(e.target.result);
                         
                         bytesSent += chunk.size;
-                        const progress = ((chunkIndex + 1) / totalChunks) * 100;
+                        const progress = (bytesSent / file.size) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
-                        const speed = (bytesSent / 1024 / 1024) / elapsed;
+                        const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
 
                         updateTransferProgress(progress, speed, 'Sending');
                         
                         chunkIndex++;
                         
-                        if (chunkIndex < totalChunks) {
-                            sendNextChunk();
-                        }
-                    } catch (e) {
-                        console.error('❌ Error sending chunk:', e);
-                        showNotification('Error sending file', 'error');
+                        setTimeout(sendNextChunk, 0);
+
+                    } catch (err) {
+                        console.error('Error sending chunk:', err);
+                        showNotification(`Error sending file: ${err.message}`, 'error');
                         pendingSendFile = null;
                     }
                 };
@@ -509,8 +509,7 @@
 
         // RECEIVER SIDE
         function handleFileRequest(metadata, conn) {
-            console.log('📥 Received file request:', metadata.name);
-            
+            console.log('Received file request:', metadata);
             receiveFileTransfer = {
                 metadata: metadata,
                 conn: conn,
@@ -540,11 +539,10 @@
             document.getElementById('fileReceiveModal').classList.remove('show');
             
             if (receiveFileTransfer) {
-                console.log('✅ User ACCEPTED file - sending response...');
+                console.log('Accepting file and sending response...');
                 receiveFileTransfer.accepted = true;
                 receiveFileTransfer.startTime = Date.now();
                 
-                // Send acceptance message
                 currentConnection.send({
                     type: 'file-accepted',
                     fileName: receiveFileTransfer.metadata.name
@@ -552,7 +550,7 @@
                 
                 showTransferProgress(receiveFileTransfer.metadata.name);
                 updateTransferProgress(0, 0, 'Waiting for file...');
-                showNotification('Waiting for sender to start...', 'info');
+                showNotification('File accepted - waiting for transfer', 'info');
             }
         }
 
@@ -560,8 +558,7 @@
             document.getElementById('fileReceiveModal').classList.remove('show');
             
             if (receiveFileTransfer) {
-                console.log('❌ User DECLINED file - sending response...');
-                
+                console.log('Declining file and sending response...');
                 currentConnection.send({
                     type: 'file-rejected',
                     fileName: receiveFileTransfer.metadata.name
@@ -573,13 +570,8 @@
         }
 
         function receiveChunk(data, conn) {
-            if (!receiveFileTransfer) {
-                console.log('⚠️ Received chunk but no active transfer');
-                return;
-            }
-            
-            if (!receiveFileTransfer.accepted) {
-                console.log('⚠️ Received chunk but file not accepted yet');
+            if (!receiveFileTransfer || !receiveFileTransfer.accepted) {
+                console.log('Received chunk but file not accepted');
                 return;
             }
 
@@ -601,9 +593,9 @@
 
             const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
             const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
-            const speed = (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed;
+            const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
             
-            console.log(`📥 Receiving: ${progress.toFixed(1)}% (${receiveFileTransfer.receivedSize} / ${receiveFileTransfer.metadata.size} bytes)`);
+            console.log(`Receiving: ${progress.toFixed(2)}% - ${receiveFileTransfer.receivedSize} / ${receiveFileTransfer.metadata.size} bytes`);
             updateTransferProgress(progress, speed, 'Receiving');
 
             if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) {
@@ -614,12 +606,10 @@
         function completeFileReceive() {
             if (!receiveFileTransfer) return;
             
-            console.log('✅ Transfer complete! Creating download...');
+            console.log('Transfer complete! Creating download...');
             
             try {
                 const blob = new Blob(receiveFileTransfer.chunks, { type: receiveFileTransfer.metadata.fileType });
-                console.log('Blob created:', blob.size, 'bytes');
-                
                 const url = URL.createObjectURL(blob);
                 
                 const a = document.createElement('a');
@@ -636,7 +626,7 @@
                 showNotification('File received successfully!', 'success');
                 receiveFileTransfer = null;
             } catch (e) {
-                console.error('❌ Error completing file receive:', e);
+                console.error('Error completing file receive:', e);
                 showNotification('Error completing file download', 'error');
                 receiveFileTransfer = null;
             }
@@ -696,7 +686,7 @@
             html5QrCode = new Html5Qrcode("qr-reader");
             html5QrCode.start(
                 { facingMode: "environment" },
-                { fps: 10, qrbox: 250 },
+                { fps: 10, qrbox: {width: 250, height: 250} },
                 (decodedText) => {
                     document.getElementById('remotePeerId').value = decodedText;
                     closeQRScanner();
@@ -709,7 +699,7 @@
         }
 
         function closeQRScanner() {
-            if (html5QrCode) {
+            if (html5QrCode && html5QrCode.isScanning) {
                 html5QrCode.stop().then(() => {
                     html5QrCode.clear();
                     html5QrCode = null;
@@ -764,3 +754,4 @@
     </script>
 </body>
 </html>
+
