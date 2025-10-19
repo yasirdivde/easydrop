@@ -22,6 +22,8 @@
     .modal.show { display: flex; align-items: center; justify-content: center; }
     .chat-bubble-sent { background-color: #3b82f6; color: #fff; align-self: flex-end; }
     .chat-bubble-received { background-color: #e5e7eb; color: #1f2937; align-self: flex-start; }
+    .queue-item:hover .cancel-btn { opacity: 1; }
+    .cancel-btn { opacity: 0.6; transition: opacity .15s ease; }
   </style>
 </head>
 <body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
@@ -174,7 +176,7 @@
           <h3 class="text-lg font-bold text-slate-800 mb-4">
             <i class="fas fa-history text-purple-600 mr-2"></i>Session History
           </h3>
-          <div id="sessionHistory" class="space-y-2 max-h-40 overflow-y-auto">
+          <div id="sessionHistory" class="space-y-2 max-h-60 overflow-y-auto">
             <p class="text-sm text-slate-400 text-center py-4">No events yet</p>
           </div>
         </div>
@@ -219,7 +221,7 @@
       <div class="bg-slate-50 rounded-lg p-4 mb-6 flex items-center gap-3">
         <i id="fileReceiveIcon" class="fas fa-file text-3xl text-blue-600"></i>
         <div class="flex-1 min-w-0">
-          <p id="fileReceiveName" class="font-bold text-slate-800 truncate"></p>
+          <p id="fileReceiveName" class="font-bold text-slate-800"></p>
           <p id="fileReceiveSize" class="text-sm text-slate-500"></p>
           <p id="fileReceiveFrom" class="text-xs text-slate-400 mt-1"></p>
         </div>
@@ -306,12 +308,15 @@
 
   // File transfer
   const pendingReceives = new Map(); // transferId -> { meta, chunks[], size, conn, start }
-  const sendQueue = []; // [{ file }]
+  const sendQueue = []; // [{ baseId, file }]
   let currentSend = null; // { baseId, file }
-  const CHUNK_SIZE = 256 * 1024;
+
+  // Throughput tuning
+  const CHUNK_SIZE = 1024 * 1024;     // 1 MiB chunks for higher throughput
+  const WINDOW_SIZE = 8;              // pipeline up to 8 in-flight chunks
 
   // Per-recipient send states
-  const sendStates = new Map(); // transferKey -> { baseId, peerId, file, conn, start, bytesSent, nextIndex, totalChunks }
+  const sendStates = new Map(); // transferKey -> { baseId, peerId, file, conn, start, nextIndex, totalChunks, inFlight, ackedCount, ackedBytes }
   const groupSendTracker = new Map(); // baseId -> { targets:Set, accepted:Set, rejected:Set, completed:Set }
 
   // QR
@@ -486,6 +491,17 @@
     handleConnection(conn);
   }
 
+  function leaveRoom() {
+    if (connectionMode !== "room") {
+      location.reload();
+      return;
+    }
+    // Inform peers and close connections, then reload host page
+    broadcast({ type: "room-closed" });
+    Object.values(connections).forEach(c => { try { c.close(); } catch(_) {} });
+    setTimeout(() => location.reload(), 300);
+  }
+
   // ---------- Connection lifecycle ----------
   function handleConnection(conn) {
     conn.on("open", () => {
@@ -506,7 +522,6 @@
       delete connections[conn.peer];
       if (connectionMode === "direct") {
         notify("Peer disconnected.", "info");
-        // Return to home for direct
         setTimeout(() => location.reload(), 600);
       } else {
         updatePeerListUI();
@@ -546,12 +561,11 @@
         break;
       }
 
-      case "room-members":
-      case "new-peer":
-      case "peer-left":
-      case "kicked":
-        // Not used in this minimal star-topology implementation
+      case "room-closed": {
+        notify("Room closed by host.", "warning");
+        setTimeout(() => location.reload(), 400);
         break;
+      }
 
       // Chat
       case "chat-message": {
@@ -581,6 +595,10 @@
         onAck(data, conn);
         break;
       }
+      case "file-cancel": {
+        onFileCancel(data, conn);
+        break;
+      }
 
       default: break;
     }
@@ -588,8 +606,8 @@
 
   // ---------- UI: transfer window ----------
   function showTransferWindow() {
-    closeQRScanner();
-    closeQR();
+    closeQR(); // ensure own QR modal is closed
+    // Scanner auto-close only for direct path; room scanning remains open until user closes
     $("homeScreen").classList.add("hidden");
     $("transferWindow").classList.remove("hidden");
 
@@ -641,7 +659,7 @@
             <button class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600" onclick="showRoomQr()">
               <i class="fas fa-qrcode mr-2"></i>Show QR
             </button>
-            <button class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="location.reload()">
+            <button class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="leaveRoom()">
               <i class="fas fa-door-open mr-2"></i>Leave Room
             </button>
           </div>
@@ -676,8 +694,8 @@
     if (!isHost) return;
     const c = connections[peerId];
     if (c) {
-      c.send({ type: "kicked" });
-      setTimeout(() => c.close(), 100);
+      c.send({ type: "room-closed" });
+      setTimeout(() => { try { c.close(); } catch(_) {} }, 100);
     }
   };
 
@@ -690,7 +708,10 @@
       return;
     }
     for (const file of files) {
-      sendQueue.push({ file });
+      const baseId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      sendQueue.push({ baseId, file });
+      // Show pending item as "Waiting..."
+      addQueueUI(`pending-${baseId}`, `${file.name}`, true, "Waiting...");
     }
     if (!currentSend) processSendQueue();
   }
@@ -698,8 +719,12 @@
   function processSendQueue() {
     if (currentSend || sendQueue.length === 0) return;
     const next = sendQueue.shift();
-    const baseId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    currentSend = { baseId, file: next.file };
+    const baseId = next.baseId;
+    const file = next.file;
+    currentSend = { baseId, file };
+
+    // Remove the pending placeholder
+    removeQueueItemInstant(`pending-${baseId}`);
 
     // Determine recipients
     const recipients = connectionMode === "direct"
@@ -718,17 +743,16 @@
     for (const c of recipients) {
       const peerName = c.metadata?.deviceName || c.peer;
       const transferKey = getTransferKey(baseId, c.peer);
-      addQueueUI(transferKey, `${next.file.name} → ${peerName}`, true);
+      addQueueUI(transferKey, `${file.name} → ${peerName}`, true, "Offering...");
       c.send({
         type: "file-request",
         id: baseId,
-        name: next.file.name,
-        size: next.file.size,
-        fileType: next.file.type,
+        name: file.name,
+        size: file.size,
+        fileType: file.type,
         senderId: myPeerId,
         senderName: myDeviceName
       });
-      // Initialize a send state only after acceptance to avoid zero-speed display
     }
   }
 
@@ -742,7 +766,7 @@
     const tracker = groupSendTracker.get(baseId);
     if (tracker) tracker.accepted.add(conn.peer);
 
-    // Create send state and start sending to this peer
+    // Create send state and start pipelined sending to this peer
     const file = currentSend.file;
     const transferKey = getTransferKey(baseId, conn.peer);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -752,11 +776,13 @@
       file,
       conn,
       start: Date.now(),
-      bytesSent: 0,
       nextIndex: 0,
-      totalChunks
+      totalChunks,
+      inFlight: 0,
+      ackedCount: 0,
+      ackedBytes: 0
     });
-    sendNextChunkToPeer(transferKey);
+    pumpChunks(transferKey);
   }
 
   function onFileRejected(data, conn) {
@@ -778,7 +804,6 @@
 
     // Room: if all have rejected and none accepted, remove all items for this baseId
     if (tracker && tracker.rejected.size === tracker.targets.size && tracker.accepted.size === 0) {
-      // Remove all UI items for this baseId
       for (const peerId of tracker.targets) {
         const key = getTransferKey(baseId, peerId);
         removeQueueItemInstant(key);
@@ -793,74 +818,79 @@
     const key = getTransferKey(data.transferId, conn.peer);
     const state = sendStates.get(key);
     if (!state) return;
-    // Next chunk index is ackedIndex+1
-    state.nextIndex = data.chunkIndex + 1;
-    sendNextChunkToPeer(key);
-  }
 
-  async function sendNextChunkToPeer(transferKey) {
-    const state = sendStates.get(transferKey);
-    if (!state) return;
-    const { file, conn, baseId } = state;
+    state.inFlight = Math.max(0, state.inFlight - 1);
+    state.ackedCount += 1;
+    // Compute bytes acked
+    const isLast = (data.chunkIndex === state.totalChunks - 1);
+    const sizeAck = isLast ? (state.file.size - CHUNK_SIZE * (state.totalChunks - 1)) : CHUNK_SIZE;
+    state.ackedBytes += sizeAck;
 
-    if (state.nextIndex >= state.totalChunks) {
-      updateProgressUI(transferKey, 100, senderSpeedMBps(state), "Sent!");
-      addHistory(`Sent ${file.name} (${formatBytes(file.size)})`, "send");
+    const progress = (state.ackedCount / state.totalChunks) * 100;
+    const speed = senderSpeedMBps(state);
+    const status = connectionMode === "direct"
+      ? "Sending..."
+      : `Sending to ${state.conn.metadata?.deviceName || state.peerId}`;
+    updateProgressUI(key, progress, speed, status);
+
+    // Completed for this peer
+    if (state.ackedCount >= state.totalChunks) {
+      updateProgressUI(key, 100, speed, "Sent!");
+      addHistory(`Sent ${state.file.name} (${formatBytes(state.file.size)})`, "send");
       beep("complete");
 
-      // Mark completed
-      const tracker = groupSendTracker.get(baseId);
+      const tracker = groupSendTracker.get(state.baseId);
       if (tracker) tracker.completed.add(conn.peer);
 
-      // Clear state for this peer
-      sendStates.delete(transferKey);
-
-      // If all peers have either completed or rejected, finish this file and move on
-      cleanupCurrentSendIfFinished(baseId);
+      sendStates.delete(key);
+      cleanupCurrentSendIfFinished(state.baseId);
       return;
     }
 
-    const start = state.nextIndex * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    const blob = file.slice(start, end);
-    const arrayBuffer = await blob.arrayBuffer();
+    // Try to fill the window again
+    pumpChunks(key);
+  }
 
-    conn.send({
-      type: "file-chunk",
-      payload: arrayBuffer,
-      transferId: baseId,
-      chunkIndex: state.nextIndex,
-      totalChunks: state.totalChunks,
-      name: file.name,
-      fileType: file.type,
-      size: file.size,
-      senderName: myDeviceName
-    });
+  async function pumpChunks(transferKey) {
+    const state = sendStates.get(transferKey);
+    if (!state) return;
+    const { file, conn } = state;
+    while (state.inFlight < WINDOW_SIZE && state.nextIndex < state.totalChunks) {
+      const start = state.nextIndex * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const blob = file.slice(start, end);
+      const arrayBuffer = await blob.arrayBuffer();
 
-    state.bytesSent += (end - start);
+      conn.send({
+        type: "file-chunk",
+        payload: arrayBuffer,
+        transferId: state.baseId,
+        chunkIndex: state.nextIndex,
+        totalChunks: state.totalChunks,
+        name: file.name,
+        fileType: file.type,
+        size: file.size,
+        senderName: myDeviceName
+      });
 
-    const progress = ((state.nextIndex + 1) / state.totalChunks) * 100;
-    const status = connectionMode === "direct"
-      ? "Sending..."
-      : `Sending to ${conn.metadata?.deviceName || conn.peer}`;
-    updateProgressUI(transferKey, progress, senderSpeedMBps(state), status);
-    // Note: nextIndex will be advanced on ack
+      state.nextIndex += 1;
+      state.inFlight += 1;
+      // Note: progress is updated on ACK for accuracy
+    }
   }
 
   function senderSpeedMBps(state) {
     const elapsed = Math.max(0.001, (Date.now() - state.start) / 1000);
-    return (state.bytesSent / 1024 / 1024) / elapsed;
+    return (state.ackedBytes / 1024 / 1024) / elapsed;
   }
 
   function cleanupCurrentSendIfFinished(baseId) {
     const tracker = groupSendTracker.get(baseId);
     if (!tracker) {
-      // Direct path with immediate reject or single completion
       currentSend = null;
       processSendQueue();
       return;
     }
-    // Finished when accepted+rejected equals targets and no active sendStates for this baseId
     const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
     const decidedCount = tracker.accepted.size + tracker.rejected.size;
     const allDecided = decidedCount === tracker.targets.size;
@@ -869,6 +899,44 @@
       currentSend = null;
       groupSendTracker.delete(baseId);
       processSendQueue();
+    }
+  }
+
+  // ---------- Cancel (sender only) ----------
+  function cancelPending(baseId) {
+    // Remove from queue list
+    const idx = sendQueue.findIndex(t => t.baseId === baseId);
+    if (idx !== -1) {
+      sendQueue.splice(idx, 1);
+      removeQueueItemInstant(`pending-${baseId}`);
+    }
+  }
+
+  function cancelTransfer(transferKey) {
+    // Parse key
+    const [baseId, peerId] = transferKey.split("|");
+    const conn = connections[peerId];
+    if (conn && conn.open) {
+      conn.send({ type: "file-cancel", id: baseId });
+    }
+    // Remove active state if any
+    if (sendStates.has(transferKey)) {
+      sendStates.delete(transferKey);
+    }
+    // Update UI
+    updateProgressUI(transferKey, undefined, undefined, "Cancelled");
+    // Mark as rejected in tracker to allow cleanup if all done
+    const tracker = groupSendTracker.get(baseId);
+    if (tracker) {
+      tracker.rejected.add(peerId);
+      // If all peers are done/decided and no active state remains, finish this send
+      cleanupCurrentSendIfFinished(baseId);
+    } else {
+      // Direct path with no tracker (shouldn't happen, but safe)
+      if (currentSend && currentSend.baseId === baseId) {
+        currentSend = null;
+        processSendQueue();
+      }
     }
   }
 
@@ -912,7 +980,7 @@
     const p = pendingReceives.get(transferId);
     if (!p) return;
     p.conn.send({ type: "file-accepted", id: transferId, name: p.meta.name });
-    addQueueUI(transferId, p.meta.name, false);
+    addQueueUI(transferId, p.meta.name, false, "Receiving...");
     $("fileReceiveModal").classList.remove("show");
   });
 
@@ -929,7 +997,7 @@
   function onFileChunk(data, conn) {
     const { payload, transferId, chunkIndex, totalChunks, fileType, name, size } = data;
     const p = pendingReceives.get(transferId);
-    if (!p) return;
+    if (!p) return; // may have been cancelled
 
     p.chunks[chunkIndex] = payload;
     p.receivedSize += (payload?.byteLength || 0);
@@ -969,28 +1037,60 @@
     }
   }
 
+  function onFileCancel(data, conn) {
+    const id = data.id;
+    const p = pendingReceives.get(id);
+    if (p) {
+      // Close modal if referring to this transfer
+      if ($("fileReceiveModal").dataset.transferId === id) {
+        $("fileReceiveModal").classList.remove("show");
+      }
+      pendingReceives.delete(id);
+    }
+    // Remove any queue UI for receiver
+    removeQueueItemInstant(id);
+    notify("Sender cancelled the transfer.", "warning");
+  }
+
   // ---------- Queue UI ----------
-  function addQueueUI(id, fileName, isSender) {
+  function addQueueUI(id, fileName, isSender, initialStatus = null) {
     const q = $("fileQueue");
     if (q.querySelector("p")) q.innerHTML = "";
     const el = document.createElement("div");
     el.id = `transfer-${id}`;
+    el.className = "queue-item";
     el.innerHTML = `
       <div class="bg-slate-100 rounded-lg p-3 mb-2">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-slate-700 truncate" title="${fileName}">${fileName}</span>
-          <span class="text-sm font-medium text-blue-600" id="percent-${id}">0%</span>
+          <span class="text-sm font-medium text-slate-800" title="${fileName}">${fileName}</span>
+          <div class="flex items-center gap-3">
+            <span class="text-sm font-medium text-blue-600" id="percent-${id}">0%</span>
+            ${isSender ? `<button id="cancel-${id}" class="cancel-btn text-red-600 hover:text-red-700" title="Cancel"><i class="fas fa-times-circle"></i></button>` : ``}
+          </div>
         </div>
         <div class="w-full bg-slate-200 rounded-full h-2">
           <div id="bar-${id}" class="bg-blue-600 h-2 rounded-full" style="width:0%"></div>
         </div>
-        <div class="flex justify-between text-xs text-slate-500 mt-1">
+        <div class="flex justify-between text-xs text-slate-600 mt-1">
           <span id="speed-${id}">0.00 MB/s</span>
-          <span id="status-${id}">${isSender ? "Offering..." : "Waiting..."}</span>
+          <span id="status-${id}">${initialStatus ?? (isSender ? "Offering..." : "Waiting...")}</span>
         </div>
       </div>
     `;
     q.appendChild(el);
+
+    // Hook cancel
+    if (isSender) {
+      const btn = document.getElementById(`cancel-${id}`);
+      if (btn) {
+        if (id.startsWith("pending-")) {
+          const baseId = id.slice("pending-".length);
+          btn.addEventListener("click", () => cancelPending(baseId));
+        } else {
+          btn.addEventListener("click", () => cancelTransfer(id));
+        }
+      }
+    }
   }
 
   function updateProgressUI(id, progress, speedMBps, status) {
@@ -1012,13 +1112,13 @@
       statusEl.textContent = status;
     }
 
-    if (["Completed!", "Declined", "Error!", "Sent!"].includes(status)) {
+    if (["Completed!", "Declined", "Error!", "Sent!", "Cancelled"].includes(status)) {
       setTimeout(() => {
         root.remove();
         if (!document.querySelector("[id^='transfer-']")) {
           $("fileQueue").innerHTML = `<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>`;
         }
-      }, 2500);
+      }, 2000);
     }
   }
 
@@ -1066,7 +1166,7 @@
     if (!isSent) beep("info");
   }
 
-  // ---------- History (file events only) ----------
+  // ---------- History (show all file events in detail) ----------
   function addHistory(message, type = "info") {
     if (!["send", "receive", "decline"].includes(type)) return;
     const h = $("sessionHistory");
@@ -1083,12 +1183,12 @@
     div.innerHTML = `
       <i class="fas ${icons[type]}"></i>
       <div class="flex-1 min-w-0">
-        <p class="text-sm text-slate-800 truncate">${message}</p>
+        <p class="text-sm text-slate-800 whitespace-normal break-words">${message}</p>
         <p class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</p>
       </div>
     `;
     h.insertBefore(div, h.firstChild);
-    while (h.children.length > 10) h.removeChild(h.lastChild);
+    // Keep a generous history; no truncation to ensure all details remain
   }
 
   // ---------- QR ----------
@@ -1126,13 +1226,13 @@
       (decodedText) => {
         if (qrScannerMode === "direct") {
           $("remotePeerIdInput").value = decodedText;
+          // Auto-close scanner ONLY for direct connections
           closeQRScanner();
           closeQR();
           connectDirect();
         } else {
           $("roomCodeInput").value = decodedText;
-          closeQRScanner();
-          closeQR();
+          // For rooms, do NOT auto-close scanner per requirement; user can close manually
           joinRoom();
         }
       },
