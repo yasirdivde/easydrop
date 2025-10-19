@@ -121,12 +121,26 @@
                     <i class="fas fa-times mr-2"></i>Close Connection
                 </button>
             </div>
+            
+            <!-- Activity Timer -->
+            <div class="mt-4 bg-white/20 rounded-lg p-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-clock"></i>
+                        <span class="text-sm">Auto-disconnect timer:</span>
+                    </div>
+                    <span id="activityTimer" class="text-lg font-bold">2:00</span>
+                </div>
+                <div class="w-full bg-white/30 rounded-full h-2 mt-2">
+                    <div id="activityTimerBar" class="bg-white h-2 rounded-full transition-all" style="width: 100%"></div>
+                </div>
+            </div>
         </div>
 
         <!-- Timer Warning -->
         <div id="timerWarning" class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-lg">
             <div class="flex items-center">
-                <i class="fas fa-clock text-2xl mr-3"></i>
+                <i class="fas fa-exclamation-triangle text-2xl mr-3"></i>
                 <div>
                     <p class="font-bold">Inactivity Warning</p>
                     <p class="text-sm">Connection will close in <span id="timerCountdown">60</span> seconds due to inactivity</p>
@@ -239,9 +253,11 @@
         let pendingFileTransfer = null;
         let inactivityTimer = null;
         let inactivityWarningTimer = null;
-        let isFileAccepted = false;
-        const INACTIVITY_TIMEOUT = 120000; // 2 minutes in milliseconds
-        const WARNING_TIME = 60000; // Show warning 1 minute before disconnect
+        let timerDisplayInterval = null;
+        let inactivityStartTime = null;
+        let fileInputListenersAdded = false;
+        const INACTIVITY_TIMEOUT = 120000; // 2 minutes
+        const WARNING_TIME = 60000; // 1 minute warning
 
         // Load device name from localStorage
         function loadDeviceName() {
@@ -341,16 +357,21 @@
             });
 
             conn.on('data', (data) => {
-                resetInactivityTimer(); // Reset timer on any data received
+                console.log('Received data:', data.type);
+                resetInactivityTimer();
                 
                 if (data.type === 'file') {
                     handleFileMetadata(data, conn);
                 } else if (data.type === 'chunk') {
-                    if (isFileAccepted) {
-                        receiveChunk(data, conn);
-                    }
+                    receiveChunk(data, conn);
                 } else if (data.type === 'activity') {
                     // Just reset timer
+                } else if (data.type === 'accept') {
+                    // Receiver accepted the file, start sending
+                    startSendingFile(data.fileName);
+                } else if (data.type === 'decline') {
+                    // Receiver declined the file
+                    handleFileDeclined(data.fileName);
                 }
             });
 
@@ -370,30 +391,82 @@
             document.getElementById('connectedDeviceName').textContent = conn.metadata?.deviceName || 'Unknown Device';
             document.getElementById('connectedDeviceId').textContent = conn.peer;
             
-            // Setup file input
+            // Setup file input only once
+            if (!fileInputListenersAdded) {
+                setupFileInput();
+                fileInputListenersAdded = true;
+            }
+        }
+
+        function setupFileInput() {
             const dropZone = document.getElementById('dropZone');
             const fileInput = document.getElementById('fileInput');
             
-            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.onclick = (e) => {
+                if (e.target.tagName !== 'INPUT') {
+                    fileInput.click();
+                }
+            };
+            
             dropZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 dropZone.classList.add('border-blue-500', 'bg-blue-50');
             });
+            
             dropZone.addEventListener('dragleave', () => {
                 dropZone.classList.remove('border-blue-500', 'bg-blue-50');
             });
+            
             dropZone.addEventListener('drop', (e) => {
                 e.preventDefault();
                 dropZone.classList.remove('border-blue-500', 'bg-blue-50');
                 if (e.dataTransfer.files.length > 0) {
-                    sendFile(e.dataTransfer.files[0]);
+                    handleFileSelection(e.dataTransfer.files[0]);
                 }
             });
-            fileInput.addEventListener('change', (e) => {
+            
+            fileInput.onchange = (e) => {
                 if (e.target.files.length > 0) {
-                    sendFile(e.target.files[0]);
+                    handleFileSelection(e.target.files[0]);
+                    e.target.value = ''; // Reset file input
                 }
+            };
+        }
+
+        function handleFileSelection(file) {
+            if (!file || !currentConnection) return;
+            
+            resetInactivityTimer();
+            
+            // Send file metadata and wait for acceptance
+            currentConnection.send({
+                type: 'file',
+                name: file.name,
+                size: file.size,
+                fileType: file.type
             });
+            
+            // Store file for later sending
+            pendingFileTransfer = {
+                file: file,
+                waiting: true
+            };
+            
+            showNotification('Waiting for recipient to accept file...', 'info');
+        }
+
+        function startSendingFile(fileName) {
+            if (!pendingFileTransfer || !pendingFileTransfer.file) return;
+            
+            const file = pendingFileTransfer.file;
+            pendingFileTransfer = null;
+            
+            sendFile(file);
+        }
+
+        function handleFileDeclined(fileName) {
+            pendingFileTransfer = null;
+            showNotification('File transfer declined by recipient', 'warning');
         }
 
         function closeConnection() {
@@ -405,6 +478,8 @@
             document.getElementById('homeScreen').classList.remove('hidden');
             document.getElementById('transferWindow').classList.add('hidden');
             document.getElementById('transferHistory').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No transfers yet</p>';
+            fileInputListenersAdded = false;
+            pendingFileTransfer = null;
             showNotification('Connection closed', 'info');
         }
 
@@ -412,6 +487,7 @@
         function resetInactivityTimer() {
             clearInactivityTimer();
             document.getElementById('timerWarning').classList.add('hidden');
+            inactivityStartTime = Date.now();
             
             // Send activity signal to other device
             if (currentConnection) {
@@ -420,7 +496,10 @@
                 } catch (e) {}
             }
             
-            // Set warning timer (show warning 1 minute before disconnect)
+            // Update timer display
+            updateTimerDisplay();
+            
+            // Set warning timer
             inactivityWarningTimer = setTimeout(() => {
                 showInactivityWarning();
             }, WARNING_TIME);
@@ -430,6 +509,31 @@
                 showNotification('Connection closed due to inactivity', 'warning');
                 closeConnection();
             }, INACTIVITY_TIMEOUT);
+        }
+
+        function updateTimerDisplay() {
+            if (timerDisplayInterval) {
+                clearInterval(timerDisplayInterval);
+            }
+            
+            timerDisplayInterval = setInterval(() => {
+                if (!inactivityStartTime) return;
+                
+                const elapsed = Date.now() - inactivityStartTime;
+                const remaining = Math.max(0, INACTIVITY_TIMEOUT - elapsed);
+                const minutes = Math.floor(remaining / 60000);
+                const seconds = Math.floor((remaining % 60000) / 1000);
+                
+                document.getElementById('activityTimer').textContent = 
+                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                const progress = (remaining / INACTIVITY_TIMEOUT) * 100;
+                document.getElementById('activityTimerBar').style.width = progress + '%';
+                
+                if (remaining <= 0) {
+                    clearInterval(timerDisplayInterval);
+                }
+            }, 100);
         }
 
         function showInactivityWarning() {
@@ -453,10 +557,16 @@
                 clearTimeout(inactivityWarningTimer);
                 inactivityWarningTimer = null;
             }
+            if (timerDisplayInterval) {
+                clearInterval(timerDisplayInterval);
+                timerDisplayInterval = null;
+            }
+            inactivityStartTime = null;
         }
 
         // File Sending
         const CHUNK_SIZE = 16384;
+        let currentFileSend = null;
 
         function sendFile(file) {
             if (!file || !currentConnection) return;
@@ -464,66 +574,81 @@
             resetInactivityTimer();
             showTransferProgress(file.name);
 
-            currentConnection.send({
-                type: 'file',
-                name: file.name,
-                size: file.size,
-                fileType: file.type
-            });
-
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let chunkIndex = 0;
             let startTime = Date.now();
 
-            const reader = new FileReader();
+            currentFileSend = {
+                file: file,
+                reader: new FileReader(),
+                totalChunks: totalChunks,
+                chunkIndex: 0,
+                startTime: startTime
+            };
             
-            function readNextChunk() {
-                if (chunkIndex >= totalChunks) {
-                    hideTransferProgress();
-                    addToHistory('Sent: ' + file.name, 'send');
-                    showNotification('File sent successfully!', 'success');
-                    resetInactivityTimer();
-                    return;
-                }
+            readAndSendNextChunk();
+        }
 
-                const start = chunkIndex * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, file.size);
-                const chunk = file.slice(start, end);
-
-                reader.readAsArrayBuffer(chunk);
+        function readAndSendNextChunk() {
+            if (!currentFileSend || !currentConnection) return;
+            
+            const { file, reader, totalChunks, startTime } = currentFileSend;
+            let { chunkIndex } = currentFileSend;
+            
+            if (chunkIndex >= totalChunks) {
+                hideTransferProgress();
+                addToHistory('Sent: ' + file.name, 'send');
+                showNotification('File sent successfully!', 'success');
+                currentFileSend = null;
+                resetInactivityTimer();
+                return;
             }
 
+            const start = chunkIndex * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+
             reader.onload = (e) => {
-                currentConnection.send({
-                    type: 'chunk',
-                    data: e.target.result,
-                    index: chunkIndex,
-                    total: totalChunks,
-                    fileName: file.name
-                });
+                try {
+                    currentConnection.send({
+                        type: 'chunk',
+                        data: e.target.result,
+                        index: chunkIndex,
+                        total: totalChunks,
+                        fileName: file.name
+                    });
 
-                chunkIndex++;
-                const progress = (chunkIndex / totalChunks) * 100;
-                const elapsed = (Date.now() - startTime) / 1000;
-                const speed = ((chunkIndex * CHUNK_SIZE) / 1024) / elapsed;
+                    currentFileSend.chunkIndex++;
+                    const progress = ((chunkIndex + 1) / totalChunks) * 100;
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = (((chunkIndex + 1) * CHUNK_SIZE) / 1024) / elapsed;
 
-                updateTransferProgress(progress, speed, 'Sending');
-                readNextChunk();
+                    updateTransferProgress(progress, speed, 'Sending');
+                    
+                    // Small delay to prevent overwhelming the connection
+                    setTimeout(readAndSendNextChunk, 10);
+                } catch (e) {
+                    console.error('Error sending chunk:', e);
+                    showNotification('Error sending file', 'error');
+                    currentFileSend = null;
+                }
             };
 
-            readNextChunk();
+            reader.readAsArrayBuffer(chunk);
         }
 
         // File Receiving
+        let receiveFileTransfer = null;
+
         function handleFileMetadata(metadata, conn) {
-            pendingFileTransfer = {
+            receiveFileTransfer = {
                 metadata: metadata,
                 conn: conn,
                 chunks: [],
                 totalChunks: 0,
-                receivedChunks: 0
+                receivedChunks: 0,
+                accepted: false
             };
-            isFileAccepted = false;
 
             document.getElementById('fileReceiveName').textContent = metadata.name;
             document.getElementById('fileReceiveSize').textContent = formatBytes(metadata.size);
@@ -543,47 +668,76 @@
 
         function acceptFile() {
             document.getElementById('fileReceiveModal').classList.remove('show');
-            isFileAccepted = true;
-            if (pendingFileTransfer) {
-                showTransferProgress(pendingFileTransfer.metadata.name);
+            
+            if (receiveFileTransfer) {
+                receiveFileTransfer.accepted = true;
+                showTransferProgress(receiveFileTransfer.metadata.name);
+                
+                // Send acceptance message to sender
+                if (currentConnection) {
+                    currentConnection.send({
+                        type: 'accept',
+                        fileName: receiveFileTransfer.metadata.name
+                    });
+                }
+                
                 resetInactivityTimer();
             }
         }
 
         function declineFile() {
             document.getElementById('fileReceiveModal').classList.remove('show');
-            isFileAccepted = false;
-            pendingFileTransfer = null;
-            showNotification('File transfer declined', 'info');
+            
+            if (receiveFileTransfer) {
+                const fileName = receiveFileTransfer.metadata.name;
+                receiveFileTransfer = null;
+                
+                // Send decline message to sender
+                if (currentConnection) {
+                    currentConnection.send({
+                        type: 'decline',
+                        fileName: fileName
+                    });
+                }
+                
+                showNotification('File transfer declined', 'info');
+            }
         }
 
         function receiveChunk(data, conn) {
-            if (!pendingFileTransfer || !isFileAccepted || pendingFileTransfer.metadata.name !== data.fileName) {
+            if (!receiveFileTransfer || !receiveFileTransfer.accepted) {
+                console.log('Chunk received but file not accepted');
                 return;
             }
 
-            const transfer = pendingFileTransfer;
-            transfer.chunks[data.index] = data.data;
-            transfer.receivedChunks++;
-            transfer.totalChunks = data.total;
+            if (receiveFileTransfer.metadata.name !== data.fileName) {
+                console.log('Chunk for different file');
+                return;
+            }
 
-            const progress = (transfer.receivedChunks / transfer.totalChunks) * 100;
+            receiveFileTransfer.chunks[data.index] = data.data;
+            receiveFileTransfer.receivedChunks++;
+            receiveFileTransfer.totalChunks = data.total;
+
+            const progress = (receiveFileTransfer.receivedChunks / receiveFileTransfer.totalChunks) * 100;
             updateTransferProgress(progress, 0, 'Receiving');
 
-            if (transfer.receivedChunks === transfer.totalChunks) {
-                const blob = new Blob(transfer.chunks, { type: transfer.metadata.fileType });
+            if (receiveFileTransfer.receivedChunks === receiveFileTransfer.totalChunks) {
+                const blob = new Blob(receiveFileTransfer.chunks, { type: receiveFileTransfer.metadata.fileType });
                 const url = URL.createObjectURL(blob);
                 
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = transfer.metadata.name;
+                a.download = receiveFileTransfer.metadata.name;
+                document.body.appendChild(a);
                 a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
                 
                 hideTransferProgress();
-                addToHistory('Received: ' + transfer.metadata.name, 'receive');
+                addToHistory('Received: ' + receiveFileTransfer.metadata.name, 'receive');
                 showNotification('File received successfully!', 'success');
-                pendingFileTransfer = null;
-                isFileAccepted = false;
+                receiveFileTransfer = null;
                 resetInactivityTimer();
             }
         }
@@ -594,6 +748,7 @@
             document.getElementById('transferFileName').textContent = fileName;
             document.getElementById('transferProgressBar').style.width = '0%';
             document.getElementById('transferPercent').textContent = '0%';
+            document.getElementById('transferStatus').textContent = 'Starting...';
         }
 
         function updateTransferProgress(percent, speed, status) {
@@ -690,7 +845,7 @@
             };
 
             const notification = document.createElement('div');
-            notification.className = `fixed top-4 right-4 ${colors[type]} border-l-4 p-4 rounded-lg shadow-lg z-50 max-w-sm`;
+            notification.className = `fixed top-4 right-4 ${colors[type]} border-l-4 p-4 rounded-lg shadow-lg z-50 max-w-sm animate-slideIn`;
             notification.innerHTML = `
                 <div class="flex items-center">
                     <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} text-xl mr-3"></i>
