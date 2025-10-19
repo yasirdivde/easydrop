@@ -217,7 +217,6 @@
         let fileSendQueue = [];
         let currentSendTransfer = null;
         let receiveFileTransfer = null;
-        let isTransferCancelled = false;
         
         const peerConfig = {
             config: {
@@ -257,7 +256,15 @@
                 }
             });
 
-            peer.on('connection', handleConnection);
+            peer.on('connection', (conn) => {
+                // BUG FIX #1: If a connection is received while on the home screen,
+                // it must be a direct connection. Set the mode accordingly.
+                if (!connectionMode) {
+                    connectionMode = 'direct';
+                }
+                handleConnection(conn);
+            });
+
             peer.on('error', (err) => {
                 console.error('Peer error:', err);
                 if(err.type === 'peer-unavailable' && connectionMode === 'room') {
@@ -368,7 +375,7 @@
                 case 'kicked': showNotification("You were kicked from the room.", "warning"); leave(); break;
                 case 'room-members': data.members.forEach(id => handleConnection(peer.connect(id, {metadata:{deviceName:myDeviceName}}))); showTransferWindow(); break;
                 case 'new-peer': handleConnection(peer.connect(data.peerId, {metadata:{deviceName:myDeviceName}})); break;
-                case 'peer-left': if(connections[data.peerId]) connections[data.peerId].close(); delete connections[data.peerId]; updatePeerListUI(); break;
+                case 'peer-left': if(connections[data.peerId]) { connections[data.peerId].close(); delete connections[data.peerId]; updatePeerListUI(); } break;
                 case 'file-request': handleFileRequest(data, conn); break;
                 case 'file-accepted': handleFileAccepted(data, conn); break;
                 case 'file-rejected': console.log(`File rejected by ${conn.peer}`); break;
@@ -418,6 +425,7 @@
 
             const sendNextChunk = () => {
                 if (chunkIndex >= totalChunks) {
+                    // This logic is simplified; in a real-world scenario, you'd track completion per-user.
                     fileSendQueue.shift(); 
                     currentSendTransfer = null;
                     updateFileQueueUI();
@@ -434,7 +442,7 @@
                         const progress = (bytesSent / file.size) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
                         const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
-                        const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName}`;
+                        const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName || 'peer'}`;
                         updateTransferProgressUI(id, { progress, speed, status });
                         chunkIndex++;
                         setTimeout(sendNextChunk, 0);
@@ -474,16 +482,29 @@
             receiveFileTransfer = null;
         }
         
+        // BUG FIX #2: Robustly handle different data types for file chunks.
         function receiveChunk(data, conn) {
             if (!receiveFileTransfer || !receiveFileTransfer.accepted || conn.peer !== receiveFileTransfer.metadata.senderId) return;
-            const arrayBuffer = data.buffer instanceof ArrayBuffer ? data.buffer : data;
-            receiveFileTransfer.chunks.push(arrayBuffer);
-            receiveFileTransfer.receivedSize += arrayBuffer.byteLength;
-            const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
-            const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
-            const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
-            updateTransferProgressUI(receiveFileTransfer.metadata.id, { progress, speed, status: 'Receiving' });
-            if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) completeFileReceive();
+            
+            const processChunk = (arrayBuffer) => {
+                receiveFileTransfer.chunks.push(arrayBuffer);
+                receiveFileTransfer.receivedSize += arrayBuffer.byteLength;
+                const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
+                const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
+                const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
+                updateTransferProgressUI(receiveFileTransfer.metadata.id, { progress, speed, status: 'Receiving' });
+                if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) {
+                    completeFileReceive();
+                }
+            };
+
+            if (data instanceof Blob) {
+                data.arrayBuffer().then(processChunk);
+            } else if (data instanceof ArrayBuffer) {
+                processChunk(data);
+            } else if (data.buffer instanceof ArrayBuffer) { // For Uint8Array and other typed arrays
+                processChunk(data.buffer);
+            }
         }
 
         function completeFileReceive() {
@@ -541,6 +562,15 @@
             container.innerHTML = '';
             new QRCode(container, { text: myPeerId, width: 256, height: 256 });
             document.getElementById('qrCodeText').textContent = myPeerId;
+            document.getElementById('qrModal').classList.add('show');
+        }
+        
+        function showRoomQr() {
+            document.getElementById('qrModalTitle').textContent = 'Room Code';
+            const container = document.getElementById('qrcodeContainer');
+            container.innerHTML = '';
+            new QRCode(container, { text: roomCode, width: 256, height: 256 });
+            document.getElementById('qrCodeText').textContent = roomCode;
             document.getElementById('qrModal').classList.add('show');
         }
         
@@ -621,7 +651,7 @@
                         </div>
                          <div class="flex gap-2">
                             <button onclick="copyRoomCode()" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600"><i class="fas fa-copy mr-2"></i>Copy Code</button>
-                            <button onclick="showMyIdQr('room')" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600"><i class="fas fa-qrcode mr-2"></i>Show QR</button>
+                            <button onclick="showRoomQr()" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600"><i class="fas fa-qrcode mr-2"></i>Show QR</button>
                             <button onclick="leave()" class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600"><i class="fas fa-door-open mr-2"></i>Leave Room</button>
                         </div>
                     </div>`;
