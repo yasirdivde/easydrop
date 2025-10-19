@@ -255,9 +255,13 @@
                 document.getElementById('myPeerId').textContent = id;
                 updateConnectionStatus('Online', 'green');
                 
-                if (connectionMode === 'room' && !isHost) {
-                    const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
-                    handleConnection(hostConnection);
+                if (connectionMode === 'room') {
+                    if (isHost) {
+                        showTransferWindow();
+                    } else {
+                        const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
+                        handleConnection(hostConnection);
+                    }
                 }
             });
 
@@ -633,7 +637,7 @@
             html5QrCode = new Html5Qrcode("qr-reader");
             html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, 
                 (decodedText) => {
-                    closeQRScanner(); // Close immediately on successful scan
+                    // Do not close scanner here, let showTransferWindow handle it
                     if (qrScannerMode === 'direct') {
                         document.getElementById('remotePeerIdInput').value = decodedText;
                         connectToPeer();
@@ -807,7 +811,9 @@
         
         function addToHistoryLog(message, type) {
             const history = document.getElementById('sessionHistory');
-            if (history.querySelector('p')) history.innerHTML = '';
+            const placeholder = history.querySelector('p');
+            if (placeholder) placeholder.remove();
+            
             const icons = { 'send': 'fa-arrow-up text-blue-600', 'receive': 'fa-arrow-down text-green-600', 'connect': 'fa-link text-purple-600', 'disconnect': 'fa-unlink text-gray-500', 'decline': 'fa-times-circle text-red-500'};
             const div = document.createElement('div');
             div.className = 'flex items-center gap-3 p-2 bg-slate-50 rounded-lg';
@@ -818,6 +824,11 @@
                     <p class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</p>
                 </div>`;
             history.insertBefore(div, history.firstChild);
+
+            // Limit history to 10 entries
+            while (history.children.length > 10) {
+                history.removeChild(history.lastChild);
+            }
         }
 
         function copyMyId() { navigator.clipboard.writeText(myPeerId).then(() => showNotification('Direct ID copied!', 'success')); }
