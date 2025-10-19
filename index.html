@@ -297,7 +297,12 @@
 
   // ---------- State ----------
   let peer = null;
-  let myPeerId = null;
+  let myPeerId = null;        // actual peer id after open
+  let preferredPeerId = null; // displayed immediately
+  let peerReadyResolve = null;
+  let isPeerReady = false;
+  const peerReady = new Promise((res) => { peerReadyResolve = res; });
+
   let myDeviceName = null;
 
   let connectionMode = null; // "direct" | "room"
@@ -311,9 +316,9 @@
   const sendQueue = []; // [{ baseId, file }]
   let currentSend = null; // { baseId, file }
 
-  // Throughput tuning
-  const CHUNK_SIZE = 1024 * 1024;     // 1 MiB chunks for higher throughput
-  const WINDOW_SIZE = 8;              // pipeline up to 8 in-flight chunks
+  // Throughput tuning (larger and pipelined)
+  const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB
+  const WINDOW_SIZE = 12;             // up to 12 inflight
 
   // Per-recipient send states
   const sendStates = new Map(); // transferKey -> { baseId, peerId, file, conn, start, nextIndex, totalChunks, inFlight, ackedCount, ackedBytes }
@@ -322,6 +327,7 @@
   // QR
   let html5QrCode = null;
   let qrScannerMode = null; // "direct" | "room"
+  let qrScanLocked = false; // prevent duplicates
 
   // ---------- Peer config ----------
   const peerConfig = {
@@ -339,7 +345,14 @@
   function initialize() {
     loadDeviceName();
     bindUI();
-    setupPeer(null);
+    // Immediate ID: pre-generate and show
+    preferredPeerId = genId();
+    $("myPeerId").textContent = preferredPeerId;
+    setupPeer(preferredPeerId);
+  }
+
+  function genId() {
+    return "EZ-" + Math.random().toString(36).slice(2, 8).toUpperCase();
   }
 
   function loadDeviceName() {
@@ -359,8 +372,9 @@
     });
 
     $("copyMyIdBtn").addEventListener("click", async () => {
-      if (myPeerId) {
-        await navigator.clipboard.writeText(myPeerId);
+      const id = myPeerId || preferredPeerId;
+      if (id) {
+        await navigator.clipboard.writeText(id);
         notify("Direct ID copied!", "success");
       }
     });
@@ -406,20 +420,19 @@
 
   // ---------- Peer setup ----------
   function setupPeer(customId) {
-    try {
-      if (peer) peer.destroy();
-    } catch (_) {}
+    try { if (peer) peer.destroy(); } catch (_) {}
 
     peer = customId ? new Peer(customId, peerConfig) : new Peer(peerConfig);
 
     peer.on("open", (id) => {
       myPeerId = id;
+      isPeerReady = true;
+      if (peerReadyResolve) peerReadyResolve(true);
       $("myPeerId").textContent = id;
       updateStatus("Online", "green");
     });
 
     peer.on("connection", (conn) => {
-      // Default inbound connections to direct unless this node is a room host
       if (!connectionMode) {
         connectionMode = (isHost || (roomCode && roomCode === myPeerId)) ? "room" : "direct";
       }
@@ -428,17 +441,28 @@
 
     peer.on("error", (err) => {
       console.error("Peer error:", err);
+      // If ID is taken, retry quickly with a new one
+      if (String(err?.type || err).includes("unavailable-id")) {
+        preferredPeerId = genId();
+        $("myPeerId").textContent = preferredPeerId;
+        setupPeer(preferredPeerId);
+        return;
+      }
       const msg = connectionMode === "room"
         ? (isHost ? "Room host error." : "Room not found or unreachable.")
         : "A connection error occurred.";
       notify(msg, "error");
-      beep("error");
       updateStatus("Error", "red");
     });
 
     peer.on("disconnected", () => {
       updateStatus("Reconnecting...", "orange");
     });
+  }
+
+  function awaitPeerReady(fn) {
+    if (isPeerReady) { fn(); return; }
+    peerReady.then(() => fn());
   }
 
   function updateStatus(text, color) {
@@ -457,16 +481,14 @@
     connectionMode = "direct";
     isHost = false;
     const remoteId = $("remotePeerIdInput").value.trim();
-    if (!remoteId) {
-      notify("Please enter a Direct ID.", "warning");
-      return;
+    if (!remoteId) { notify("Please enter a Direct ID.", "warning"); return; }
+    if (remoteId === (myPeerId || preferredPeerId)) {
+      notify("Cannot connect to yourself.", "error"); return;
     }
-    if (remoteId === myPeerId) {
-      notify("Cannot connect to yourself.", "error");
-      return;
-    }
-    const conn = peer.connect(remoteId, { reliable: true, metadata: { deviceName: myDeviceName } });
-    handleConnection(conn);
+    awaitPeerReady(() => {
+      const conn = peer.connect(remoteId, { reliable: true, metadata: { deviceName: myDeviceName } });
+      handleConnection(conn);
+    });
   }
 
   // ---------- Rooms ----------
@@ -475,27 +497,28 @@
     isHost = true;
     roomCode = Math.random().toString(36).toUpperCase().slice(2, 8);
     setupPeer(roomCode);
+    // show immediately; connections will populate
     showTransferWindow();
   }
 
+  let isJoiningRoom = false;
   function joinRoom() {
+    if (isJoiningRoom) return;
+    const code = $("roomCodeInput").value.trim().toUpperCase();
+    if (!code) { notify("Please enter a room code.", "warning"); return; }
     connectionMode = "room";
     isHost = false;
-    const code = $("roomCodeInput").value.trim().toUpperCase();
-    if (!code) {
-      notify("Please enter a room code.", "warning");
-      return;
-    }
     roomCode = code;
-    const conn = peer.connect(roomCode, { reliable: true, metadata: { deviceName: myDeviceName } });
-    handleConnection(conn);
+    isJoiningRoom = true;
+    awaitPeerReady(() => {
+      const conn = peer.connect(roomCode, { reliable: true, metadata: { deviceName: myDeviceName } });
+      handleConnection(conn);
+      setTimeout(() => { isJoiningRoom = false; }, 500);
+    });
   }
 
   function leaveRoom() {
-    if (connectionMode !== "room") {
-      location.reload();
-      return;
-    }
+    if (connectionMode !== "room") { location.reload(); return; }
     // Inform peers and close connections, then reload host page
     broadcast({ type: "room-closed" });
     Object.values(connections).forEach(c => { try { c.close(); } catch(_) {} });
@@ -506,17 +529,12 @@
   function handleConnection(conn) {
     conn.on("open", () => {
       connections[conn.peer] = conn;
-
-      // Send metadata handshake with mode and roomCode
       conn.send({ type: "metadata-sync", deviceName: myDeviceName, mode: connectionMode, roomCode });
-
       showTransferWindow();
       updatePeerListUI();
     });
 
-    conn.on("data", (data) => {
-      routeData(data, conn);
-    });
+    conn.on("data", (data) => { routeData(data, conn); });
 
     conn.on("close", () => {
       delete connections[conn.peer];
@@ -551,7 +569,6 @@
         if (connections[conn.peer]) {
           connections[conn.peer].metadata = { deviceName: data.deviceName };
         }
-        // Sync mode if unset locally
         if (!connectionMode && data.mode) {
           connectionMode = data.mode;
           roomCode = data.roomCode || roomCode;
@@ -575,30 +592,12 @@
       }
 
       // File sharing
-      case "file-request": {
-        onFileRequest(data, conn);
-        break;
-      }
-      case "file-accepted": {
-        onFileAccepted(data, conn);
-        break;
-      }
-      case "file-rejected": {
-        onFileRejected(data, conn);
-        break;
-      }
-      case "file-chunk": {
-        onFileChunk(data, conn);
-        break;
-      }
-      case "file-ack": {
-        onAck(data, conn);
-        break;
-      }
-      case "file-cancel": {
-        onFileCancel(data, conn);
-        break;
-      }
+      case "file-request": { onFileRequest(data, conn); break; }
+      case "file-accepted": { onFileAccepted(data, conn); break; }
+      case "file-rejected": { onFileRejected(data, conn); break; }
+      case "file-chunk":   { onFileChunk(data, conn); break; }
+      case "file-ack":     { onAck(data, conn); break; }
+      case "file-cancel":  { onFileCancel(data, conn); break; }
 
       default: break;
     }
@@ -606,8 +605,8 @@
 
   // ---------- UI: transfer window ----------
   function showTransferWindow() {
-    closeQR(); // ensure own QR modal is closed
-    // Scanner auto-close only for direct path; room scanning remains open until user closes
+    // Close own QR modal; scanner auto-close only for direct handled in openQRScanner
+    closeQR();
     $("homeScreen").classList.add("hidden");
     $("transferWindow").classList.remove("hidden");
 
@@ -681,7 +680,6 @@
       const name = c.metadata?.deviceName || c.peer;
       html += `<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-sm text-slate-700">
         <span>${name}</span>
-        ${isHost ? `<button class="text-red-500 hover:text-red-700 text-xs font-bold" onclick="kickPeer('${c.peer}')">Kick</button>` : ``}
       </div>`;
     });
     if (!Object.values(connections).filter(c => !!c).length) {
@@ -690,27 +688,16 @@
     container.innerHTML = html;
   }
 
-  window.kickPeer = (peerId) => {
-    if (!isHost) return;
-    const c = connections[peerId];
-    if (c) {
-      c.send({ type: "room-closed" });
-      setTimeout(() => { try { c.close(); } catch(_) {} }, 100);
-    }
-  };
-
   // ---------- File send (per-recipient) ----------
   function queueFilesForTransfer(fileList) {
     const files = Array.from(fileList);
     if (!files.length) return;
     if (!Object.keys(connections).length) {
-      notify("No one is connected!", "warning");
-      return;
+      notify("No one is connected!", "warning"); return;
     }
     for (const file of files) {
       const baseId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       sendQueue.push({ baseId, file });
-      // Show pending item as "Waiting..."
       addQueueUI(`pending-${baseId}`, `${file.name}`, true, "Waiting...");
     }
     if (!currentSend) processSendQueue();
@@ -722,16 +709,12 @@
     const baseId = next.baseId;
     const file = next.file;
     currentSend = { baseId, file };
-
-    // Remove the pending placeholder
     removeQueueItemInstant(`pending-${baseId}`);
 
-    // Determine recipients
     const recipients = connectionMode === "direct"
       ? [Object.values(connections)[0]].filter(Boolean)
       : Object.values(connections);
 
-    // Track room outcomes
     groupSendTracker.set(baseId, {
       targets: new Set(recipients.map(c => c.peer)),
       accepted: new Set(),
@@ -739,7 +722,6 @@
       completed: new Set()
     });
 
-    // Send file-request to each recipient and create queue item per peer
     for (const c of recipients) {
       const peerName = c.metadata?.deviceName || c.peer;
       const transferKey = getTransferKey(baseId, c.peer);
@@ -750,15 +732,13 @@
         name: file.name,
         size: file.size,
         fileType: file.type,
-        senderId: myPeerId,
+        senderId: myPeerId || preferredPeerId,
         senderName: myDeviceName
       });
     }
   }
 
-  function getTransferKey(baseId, peerId) {
-    return `${baseId}|${peerId}`;
-  }
+  function getTransferKey(baseId, peerId) { return `${baseId}|${peerId}`; }
 
   function onFileAccepted(data, conn) {
     if (!currentSend || currentSend.baseId !== data.id) return;
@@ -766,7 +746,6 @@
     const tracker = groupSendTracker.get(baseId);
     if (tracker) tracker.accepted.add(conn.peer);
 
-    // Create send state and start pipelined sending to this peer
     const file = currentSend.file;
     const transferKey = getTransferKey(baseId, conn.peer);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -787,7 +766,6 @@
 
   function onFileRejected(data, conn) {
     if (!currentSend || currentSend.baseId !== data.id) return;
-
     const baseId = data.id;
     const tracker = groupSendTracker.get(baseId);
     if (tracker) tracker.rejected.add(conn.peer);
@@ -795,33 +773,27 @@
     const transferKey = getTransferKey(baseId, conn.peer);
     updateProgressUI(transferKey, undefined, undefined, "Declined");
 
-    // Single P2P: toast and clear immediately
     if (connectionMode === "direct") {
       notify("Transfer rejected.", "warning");
-      cleanupCurrentSendIfFinished(baseId);
+      finishBaseIfDone(baseId);
       return;
     }
-
-    // Room: if all have rejected and none accepted, remove all items for this baseId
     if (tracker && tracker.rejected.size === tracker.targets.size && tracker.accepted.size === 0) {
       for (const peerId of tracker.targets) {
-        const key = getTransferKey(baseId, peerId);
-        removeQueueItemInstant(key);
+        removeQueueItemInstant(getTransferKey(baseId, peerId));
       }
       notify("All peers rejected the file.", "warning");
-      cleanupCurrentSendIfFinished(baseId);
+      finishBaseIfDone(baseId);
     }
   }
 
   function onAck(data, conn) {
-    // data: { type:"file-ack", transferId, chunkIndex }
     const key = getTransferKey(data.transferId, conn.peer);
     const state = sendStates.get(key);
     if (!state) return;
 
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.ackedCount += 1;
-    // Compute bytes acked
     const isLast = (data.chunkIndex === state.totalChunks - 1);
     const sizeAck = isLast ? (state.file.size - CHUNK_SIZE * (state.totalChunks - 1)) : CHUNK_SIZE;
     state.ackedBytes += sizeAck;
@@ -833,21 +805,16 @@
       : `Sending to ${state.conn.metadata?.deviceName || state.peerId}`;
     updateProgressUI(key, progress, speed, status);
 
-    // Completed for this peer
     if (state.ackedCount >= state.totalChunks) {
       updateProgressUI(key, 100, speed, "Sent!");
       addHistory(`Sent ${state.file.name} (${formatBytes(state.file.size)})`, "send");
       beep("complete");
-
       const tracker = groupSendTracker.get(state.baseId);
       if (tracker) tracker.completed.add(conn.peer);
-
       sendStates.delete(key);
-      cleanupCurrentSendIfFinished(state.baseId);
+      finishBaseIfDone(state.baseId);
       return;
     }
-
-    // Try to fill the window again
     pumpChunks(key);
   }
 
@@ -858,9 +825,7 @@
     while (state.inFlight < WINDOW_SIZE && state.nextIndex < state.totalChunks) {
       const start = state.nextIndex * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
-      const blob = file.slice(start, end);
-      const arrayBuffer = await blob.arrayBuffer();
-
+      const arrayBuffer = await file.slice(start, end).arrayBuffer();
       conn.send({
         type: "file-chunk",
         payload: arrayBuffer,
@@ -872,10 +837,8 @@
         size: file.size,
         senderName: myDeviceName
       });
-
       state.nextIndex += 1;
       state.inFlight += 1;
-      // Note: progress is updated on ACK for accuracy
     }
   }
 
@@ -884,19 +847,18 @@
     return (state.ackedBytes / 1024 / 1024) / elapsed;
   }
 
-  function cleanupCurrentSendIfFinished(baseId) {
+  // When a base file is completely decided and no active streams remain, advance
+  function finishBaseIfDone(baseId) {
     const tracker = groupSendTracker.get(baseId);
+    const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
     if (!tracker) {
-      currentSend = null;
+      if (currentSend && currentSend.baseId === baseId) { currentSend = null; }
       processSendQueue();
       return;
     }
-    const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
-    const decidedCount = tracker.accepted.size + tracker.rejected.size;
-    const allDecided = decidedCount === tracker.targets.size;
-
-    if (allDecided && !activeForBase) {
-      currentSend = null;
+    const decided = tracker.accepted.size + tracker.rejected.size;
+    if (decided === tracker.targets.size && !activeForBase) {
+      currentSend = (currentSend && currentSend.baseId === baseId) ? null : currentSend;
       groupSendTracker.delete(baseId);
       processSendQueue();
     }
@@ -904,7 +866,6 @@
 
   // ---------- Cancel (sender only) ----------
   function cancelPending(baseId) {
-    // Remove from queue list
     const idx = sendQueue.findIndex(t => t.baseId === baseId);
     if (idx !== -1) {
       sendQueue.splice(idx, 1);
@@ -913,36 +874,38 @@
   }
 
   function cancelTransfer(transferKey) {
-    // Parse key
     const [baseId, peerId] = transferKey.split("|");
     const conn = connections[peerId];
-    if (conn && conn.open) {
-      conn.send({ type: "file-cancel", id: baseId });
-    }
-    // Remove active state if any
-    if (sendStates.has(transferKey)) {
-      sendStates.delete(transferKey);
-    }
-    // Update UI
+    if (conn && conn.open) { conn.send({ type: "file-cancel", id: baseId }); }
+    if (sendStates.has(transferKey)) { sendStates.delete(transferKey); }
     updateProgressUI(transferKey, undefined, undefined, "Cancelled");
-    // Mark as rejected in tracker to allow cleanup if all done
+
     const tracker = groupSendTracker.get(baseId);
     if (tracker) {
       tracker.rejected.add(peerId);
-      // If all peers are done/decided and no active state remains, finish this send
-      cleanupCurrentSendIfFinished(baseId);
-    } else {
-      // Direct path with no tracker (shouldn't happen, but safe)
-      if (currentSend && currentSend.baseId === baseId) {
-        currentSend = null;
+      // If direct mode, treat as entire send cancellation and finish immediately
+      if (connectionMode === "direct") {
+        // remove any other UI rows for this baseId
+        for (const target of tracker.targets) {
+          removeQueueItemInstant(getTransferKey(baseId, target));
+        }
+        groupSendTracker.delete(baseId);
+        if (currentSend && currentSend.baseId === baseId) currentSend = null;
         processSendQueue();
+        return;
       }
+      // Room mode: continue for others, or finish if everyone decided
+      finishBaseIfDone(baseId);
+        } else {
+      // No tracker (edge): just proceed
+      if (currentSend && currentSend.baseId === baseId) currentSend = null;
+      processSendQueue();
     }
   }
 
   // ---------- File receive ----------
   function onFileRequest(meta, conn) {
-    if (meta.senderId === myPeerId) return;
+    if (meta.senderId === (myPeerId || preferredPeerId)) return;
 
     const iconMap = {
       "jpg": "fa-file-image",
@@ -1012,9 +975,7 @@
     if (p.chunks.filter(Boolean).length === totalChunks) {
       try {
         const ordered = [];
-        for (let i = 0; i < totalChunks; i++) {
-          ordered.push(new Uint8Array(p.chunks[i]));
-        }
+        for (let i = 0; i < totalChunks; i++) ordered.push(new Uint8Array(p.chunks[i]));
         const blob = new Blob(ordered, { type: fileType || "application/octet-stream" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
@@ -1041,13 +1002,11 @@
     const id = data.id;
     const p = pendingReceives.get(id);
     if (p) {
-      // Close modal if referring to this transfer
       if ($("fileReceiveModal").dataset.transferId === id) {
         $("fileReceiveModal").classList.remove("show");
       }
       pendingReceives.delete(id);
     }
-    // Remove any queue UI for receiver
     removeQueueItemInstant(id);
     notify("Sender cancelled the transfer.", "warning");
   }
@@ -1062,7 +1021,7 @@
     el.innerHTML = `
       <div class="bg-slate-100 rounded-lg p-3 mb-2">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-slate-800" title="${fileName}">${fileName}</span>
+          <span class="text-sm font-medium text-slate-800 break-words" title="${fileName}">${fileName}</span>
           <div class="flex items-center gap-3">
             <span class="text-sm font-medium text-blue-600" id="percent-${id}">0%</span>
             ${isSender ? `<button id="cancel-${id}" class="cancel-btn text-red-600 hover:text-red-700" title="Cancel"><i class="fas fa-times-circle"></i></button>` : ``}
@@ -1079,7 +1038,6 @@
     `;
     q.appendChild(el);
 
-    // Hook cancel
     if (isSender) {
       const btn = document.getElementById(`cancel-${id}`);
       if (btn) {
@@ -1188,7 +1146,6 @@
       </div>
     `;
     h.insertBefore(div, h.firstChild);
-    // Keep a generous history; no truncation to ensure all details remain
   }
 
   // ---------- QR ----------
@@ -1196,8 +1153,8 @@
     $("qrModalTitle").textContent = "Your Direct ID";
     const container = $("qrcodeContainer");
     container.innerHTML = "";
-    new QRCode(container, { text: myPeerId || "", width: 256, height: 256 });
-    $("qrCodeText").textContent = myPeerId || "";
+    new QRCode(container, { text: (myPeerId || preferredPeerId) || "", width: 256, height: 256 });
+    $("qrCodeText").textContent = (myPeerId || preferredPeerId) || "";
     $("qrModal").classList.add("show");
   }
 
@@ -1216,7 +1173,9 @@
   }
 
   function openQRScanner(mode) {
+    if (html5QrCode) { try { html5QrCode.stop(); html5QrCode.clear(); } catch(_) {} }
     qrScannerMode = mode; // "direct" | "room"
+    qrScanLocked = false;
     $("qrScannerTitle").textContent = `Scan ${mode === "direct" ? "Peer" : "Room"} QR Code`;
     $("qrScannerModal").classList.add("show");
     html5QrCode = new Html5Qrcode("qr-reader");
@@ -1224,16 +1183,20 @@
       { facingMode: "environment" },
       { fps: 10, qrbox: { width: 250, height: 250 } },
       (decodedText) => {
+        if (qrScanLocked) return;
+        qrScanLocked = true;
+
         if (qrScannerMode === "direct") {
           $("remotePeerIdInput").value = decodedText;
-          // Auto-close scanner ONLY for direct connections
-          closeQRScanner();
+          closeQRScanner(); // auto-close for direct only
           closeQR();
           connectDirect();
         } else {
           $("roomCodeInput").value = decodedText;
-          // For rooms, do NOT auto-close scanner per requirement; user can close manually
+          // do not auto close for room; just attempt join once
           joinRoom();
+          // allow user to keep the scanner open if they want to rescan
+          setTimeout(() => { qrScanLocked = false; }, 1000);
         }
       },
       (errMsg) => { /* ignore scan errors */ }
@@ -1259,6 +1222,8 @@
       if (reader) reader.innerHTML = "";
     });
   }
-  </script>
+  // ---------- End of continuation ----------
+</script>
 </body>
 </html>
+
