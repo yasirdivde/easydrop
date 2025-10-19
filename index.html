@@ -133,7 +133,7 @@
                 </div>
             </div>
 
-            <!-- Right Column: Chat, Peers -->
+            <!-- Right Column: Chat, Peers, History -->
             <div class="flex flex-col gap-6">
                  <!-- Connected Peers (Room mode only) -->
                 <div id="peerListContainer" class="bg-white rounded-2xl shadow-lg p-4 md:p-6 hidden">
@@ -141,12 +141,21 @@
                     <div id="peerList" class="space-y-2 max-h-40 overflow-y-auto"></div>
                 </div>
                 <!-- Chat -->
-                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 flex flex-col h-[60vh] min-h-[400px]">
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 flex flex-col" style="height: 50vh; min-height: 300px;">
                     <h3 id="chatTitle" class="text-lg md:text-xl font-bold text-slate-800 mb-4"></h3>
                     <div id="chatMessages" class="flex-1 overflow-y-auto bg-slate-50 rounded-lg p-3 flex flex-col gap-2 mb-4"></div>
                     <div class="flex gap-2">
                         <input type="text" id="chatInput" class="flex-1 border border-slate-300 rounded-lg px-4 py-2" placeholder="Type a message...">
                         <button onclick="sendChatMessage()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"><i class="fas fa-paper-plane"></i></button>
+                    </div>
+                </div>
+                 <!-- Session History -->
+                 <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
+                    <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
+                        <i class="fas fa-history text-purple-600 mr-2"></i>Session History
+                    </h3>
+                    <div id="sessionHistory" class="space-y-2 max-h-40 overflow-y-auto">
+                        <p class="text-sm text-slate-400 text-center py-4">No events yet</p>
                     </div>
                 </div>
             </div>
@@ -206,9 +215,9 @@
         let peer;
         let myPeerId;
         let myDeviceName;
-        let connectionMode = null; // 'direct' or 'room'
+        let connectionMode = null;
         let roomCode = null;
-        let connections = {}; // { peerId: conn }
+        let connections = {};
         let isHost = false;
         let html5QrCode = null;
         let qrScannerMode = null;
@@ -314,6 +323,7 @@
             pendingFileTransfers.clear();
             
             document.getElementById('fileQueue').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
+            document.getElementById('sessionHistory').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No events yet</p>';
             document.getElementById('homeScreen').classList.remove('hidden');
             document.getElementById('transferWindow').classList.add('hidden');
             
@@ -326,6 +336,7 @@
                 connections[conn.peer] = conn;
                 
                 showTransferWindow();
+                addToHistoryLog(`Connected to ${conn.metadata.deviceName || 'a peer'}`, 'connect');
                 
                 if (isHost) {
                     const peerIds = Object.keys(connections).filter(id => id !== conn.peer && id !== myPeerId);
@@ -338,6 +349,7 @@
             conn.on('data', (data) => handleData(data, conn));
             conn.on('close', () => {
                 console.log(`Connection closed with ${conn.peer}`);
+                const peerName = connections[conn.peer]?.metadata?.deviceName || 'A peer';
                 delete connections[conn.peer];
                  if (connectionMode === 'direct') {
                     showNotification("Peer disconnected.", "info");
@@ -349,6 +361,7 @@
                     } else {
                         broadcast({ type: 'peer-left', peerId: conn.peer });
                         updatePeerListUI();
+                        addToHistoryLog(`${peerName} left the room`, 'disconnect');
                     }
                 }
             });
@@ -413,7 +426,10 @@
 
         function handleFileRejected(data, conn) {
             if (!currentSendTransfer || currentSendTransfer.id !== data.id) return;
-            showNotification(`${conn.metadata.deviceName} declined the file.`, 'info');
+            
+            showNotification(`${conn.metadata.deviceName} declined ${data.name}.`, 'info');
+            addToHistoryLog(`Declined: ${data.name} by ${conn.metadata.deviceName}`, 'decline');
+
             if (connectionMode === 'direct') {
                 updateTransferProgressUI(data.id, { status: 'Declined' });
                 currentSendTransfer = null;
@@ -424,7 +440,7 @@
         function sendFile(transfer, connection) {
             const { file, id } = transfer;
             let chunkIndex = 0;
-            const CHUNK_SIZE = 64 * 1024; // 64KB chunks for better reliability
+            const CHUNK_SIZE = 64 * 1024;
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let startTime = Date.now();
             let bytesSent = 0;
@@ -438,7 +454,7 @@
                     bytesSent += e.target.result.length;
                     const progress = (bytesSent / file.size) * 100;
                     const elapsed = (Date.now() - startTime) / 1000;
-                    const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
+                    const speed = elapsed > 0 ? (bytesSent / (1024 * 1024)) / elapsed : 0;
                     const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName || 'peer'}`;
                     updateTransferProgressUI(id, { progress, speed, status });
                     
@@ -447,6 +463,7 @@
                         sendNextChunk();
                     } else {
                         updateTransferProgressUI(id, { progress: 100, status: 'Sent!' });
+                        addToHistoryLog(`Sent: ${file.name}`, 'send');
                         if(id === currentSendTransfer?.id) {
                             currentSendTransfer = null;
                             processSendQueue();
@@ -488,7 +505,7 @@
             const transfer = pendingFileTransfers.get(transferId);
             if (transfer) {
                 transfer.startTime = Date.now();
-                transfer.conn.send({ type: 'file-accepted', id: transferId });
+                transfer.conn.send({ type: 'file-accepted', id: transferId, name: transfer.metadata.name });
                 addTransferToQueueUI(transferId, transfer.metadata.name);
             }
             document.getElementById('fileReceiveModal').classList.remove('show');
@@ -498,20 +515,18 @@
             const transferId = document.getElementById('fileReceiveModal').dataset.transferId;
             const transfer = pendingFileTransfers.get(transferId);
             if (transfer) {
-                transfer.conn.send({ type: 'file-rejected', id: transferId });
+                transfer.conn.send({ type: 'file-rejected', id: transferId, name: transfer.metadata.name });
                 pendingFileTransfers.delete(transferId);
+                addToHistoryLog(`Declined: ${transfer.metadata.name}`, 'decline');
             }
             document.getElementById('fileReceiveModal').classList.remove('show');
         }
 
-        // Helper to convert Base64 to ArrayBuffer
         function base64ToArrayBuffer(base64) {
             const binary_string = window.atob(base64.split(',')[1]);
             const len = binary_string.length;
             const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binary_string.charCodeAt(i);
-            }
+            for (let i = 0; i < len; i++) bytes[i] = binary_string.charCodeAt(i);
             return bytes.buffer;
         }
         
@@ -527,14 +542,13 @@
 
             const progress = (transfer.receivedSize / transfer.metadata.size) * 100;
             const elapsed = (Date.now() - transfer.startTime) / 1000;
-            const speed = elapsed > 0 ? (transfer.receivedSize / 1024 / 1024) / elapsed : 0;
+            const speed = elapsed > 0 ? (transfer.receivedSize / (1024 * 1024)) / elapsed : 0;
             updateTransferProgressUI(transferId, { progress, speed, status: 'Receiving' });
             
             if (transfer.receivedSize >= transfer.metadata.size) {
                 completeFileReceive(transferId);
             }
         }
-
 
         function completeFileReceive(transferId) {
             const transfer = pendingFileTransfers.get(transferId);
@@ -548,6 +562,7 @@
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 URL.revokeObjectURL(a.href);
                 updateTransferProgressUI(transferId, { status: 'Completed!' });
+                addToHistoryLog(`Received: ${metadata.name}`, 'receive');
                 playSound('complete');
             } catch (e) { 
                 console.error('Error completing file receive:', e); 
@@ -571,7 +586,7 @@
         }
 
         function displayChatMessage(data, isSent = false) {
-            if (isSent && data.senderName !== myDeviceName || !isSent && data.senderName === myDeviceName) return;
+            if ((isSent && data.senderName !== myDeviceName) || (!isSent && data.senderName === myDeviceName)) return;
             const messagesDiv = document.getElementById('chatMessages');
             const wrapper = document.createElement('div');
             wrapper.className = `flex flex-col ${isSent ? 'items-end' : 'items-start'}`;
@@ -618,7 +633,7 @@
             html5QrCode = new Html5Qrcode("qr-reader");
             html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, 
                 (decodedText) => {
-                    closeQRScanner();
+                    closeQRScanner(); // Close immediately on successful scan
                     if (qrScannerMode === 'direct') {
                         document.getElementById('remotePeerIdInput').value = decodedText;
                         connectToPeer();
@@ -780,7 +795,7 @@
             if (typeof speed !== 'undefined') speedEl.textContent = speed.toFixed(2) + ' MB/s';
             if (typeof status !== 'undefined') statusEl.textContent = status;
 
-            if (status === 'Completed!' || status === 'Declined' || status === 'Error!') {
+            if (status === 'Completed!' || status === 'Declined' || status === 'Error!' || status === 'Sent!') {
                 setTimeout(() => {
                     el.remove();
                     if(document.querySelectorAll('[id^="transfer-progress-"]').length === 0){
@@ -788,6 +803,21 @@
                     }
                 }, 4000);
             }
+        }
+        
+        function addToHistoryLog(message, type) {
+            const history = document.getElementById('sessionHistory');
+            if (history.querySelector('p')) history.innerHTML = '';
+            const icons = { 'send': 'fa-arrow-up text-blue-600', 'receive': 'fa-arrow-down text-green-600', 'connect': 'fa-link text-purple-600', 'disconnect': 'fa-unlink text-gray-500', 'decline': 'fa-times-circle text-red-500'};
+            const div = document.createElement('div');
+            div.className = 'flex items-center gap-3 p-2 bg-slate-50 rounded-lg';
+            div.innerHTML = `
+                <i class="fas ${icons[type]}"></i>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm text-slate-800 truncate">${message}</p>
+                    <p class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</p>
+                </div>`;
+            history.insertBefore(div, history.firstChild);
         }
 
         function copyMyId() { navigator.clipboard.writeText(myPeerId).then(() => showNotification('Direct ID copied!', 'success')); }
