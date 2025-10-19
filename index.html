@@ -246,28 +246,21 @@
                 document.getElementById('myPeerId').textContent = id;
                 updateConnectionStatus('Online', 'green');
                 
-                if (connectionMode === 'room') {
-                    if (isHost) {
-                        showTransferWindow();
-                    } else {
-                        const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
-                        handleConnection(hostConnection);
-                    }
+                if (connectionMode === 'room' && !isHost) {
+                    const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
+                    handleConnection(hostConnection);
                 }
             });
 
             peer.on('connection', (conn) => {
-                if (!connectionMode) {
-                    connectionMode = 'direct';
-                }
+                if (!connectionMode) connectionMode = 'direct';
                 handleConnection(conn);
             });
 
             peer.on('error', (err) => {
                 console.error('Peer error:', err);
-                if(err.type === 'peer-unavailable') {
-                    const message = connectionMode === 'room' ? `Room ${roomCode} not found.` : `Peer not found.`;
-                    showNotification(message, 'error');
+                if (err.type === 'peer-unavailable') {
+                    showNotification(connectionMode === 'room' ? `Room ${roomCode} not found.` : `Peer not found.`, 'error');
                     if (connectionMode === 'room') resetToHome();
                 }
                 playSound('error');
@@ -280,25 +273,26 @@
         function connectToPeer() {
             connectionMode = 'direct';
             const remoteId = document.getElementById('remotePeerIdInput').value.trim();
-            if (!remoteId) return showNotification("Please enter a Peer's Direct ID", "error");
-            if (remoteId === myPeerId) return showNotification("Cannot connect to yourself.", "error");
+            if (!remoteId || remoteId === myPeerId) {
+                return showNotification(remoteId ? "Cannot connect to yourself." : "Please enter a Peer's Direct ID", "error");
+            }
             const conn = peer.connect(remoteId, { metadata: { deviceName: myDeviceName }, reliable: true });
             handleConnection(conn);
         }
         
         function createRoom() {
             connectionMode = 'room';
-            roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
             isHost = true;
+            roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
             setupPeer(roomCode);
         }
 
         function joinRoom() {
             connectionMode = 'room';
+            isHost = false;
             const code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
             if (!code) return showNotification('Please enter a room code.', 'error');
             roomCode = code;
-            isHost = false;
             setupPeer();
         }
         
@@ -318,8 +312,8 @@
             fileSendQueue = [];
             currentSendTransfer = null;
             pendingFileTransfers.clear();
-            updateFileQueueUI();
-
+            
+            document.getElementById('fileQueue').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
             document.getElementById('homeScreen').classList.remove('hidden');
             document.getElementById('transferWindow').classList.add('hidden');
             
@@ -331,12 +325,10 @@
                 console.log(`Connected to ${conn.peer} with metadata`, conn.metadata);
                 connections[conn.peer] = conn;
                 
-                if (connectionMode === 'direct' || isHost) {
-                    showTransferWindow();
-                }
+                showTransferWindow();
                 
                 if (isHost) {
-                    const peerIds = Object.keys(connections).filter(id => id !== conn.peer);
+                    const peerIds = Object.keys(connections).filter(id => id !== conn.peer && id !== myPeerId);
                     conn.send({ type: 'room-members', members: peerIds });
                     broadcast({ type: 'new-peer', peerId: conn.peer, deviceName: conn.metadata.deviceName }, conn.peer);
                 }
@@ -374,20 +366,17 @@
         
         // --- DATA ROUTER & BROADCASTING ---
         function handleData(data, conn) {
-            if (!data || typeof data.type !== 'string') {
-                console.warn("Received malformed data:", data);
-                return;
-            }
-
+            if (!data || typeof data.type !== 'string') return console.warn("Received malformed data:", data);
+            
              switch(data.type) {
                 case 'kicked': showNotification("You were kicked from the room.", "warning"); leave(); break;
-                case 'room-members': data.members.forEach(id => { if (id !== myPeerId && !connections[id] && (!peer.connections[id] || peer.connections[id].length === 0)) handleConnection(peer.connect(id, {metadata:{deviceName:myDeviceName, reliable: true}})); }); showTransferWindow(); break;
-                case 'new-peer': if (data.peerId !== myPeerId && !connections[data.peerId] && (!peer.connections[data.peerId] || peer.connections[data.peerId].length === 0)) handleConnection(peer.connect(data.peerId, {metadata:{deviceName:myDeviceName, reliable: true}})); break;
+                case 'room-members': data.members.forEach(id => { if (id !== myPeerId && !connections[id]) handleConnection(peer.connect(id, {metadata:{deviceName:myDeviceName, reliable: true}})); }); break;
+                case 'new-peer': if (data.peerId !== myPeerId && !connections[data.peerId]) handleConnection(peer.connect(data.peerId, {metadata:{deviceName:myDeviceName, reliable: true}})); break;
                 case 'peer-left': if(connections[data.peerId]) { connections[data.peerId].close(); delete connections[data.peerId]; updatePeerListUI(); } break;
                 case 'file-request': handleFileRequest(data, conn); break;
                 case 'file-accepted': handleFileAccepted(data, conn); break;
                 case 'file-rejected': handleFileRejected(data, conn); break;
-                case 'file-chunk': receiveChunk(data.payload, data.transferId, conn); break;
+                case 'file-chunk': receiveChunk(data, conn); break;
                 case 'chat-message': displayChatMessage(data); break;
             }
         }
@@ -406,14 +395,13 @@
                 const transferId = `transfer_${Date.now()}_${Math.random()}`;
                 fileSendQueue.push({ id: transferId, file, senderId: myPeerId, senderName: myDeviceName });
             }
-            updateFileQueueUI();
             if (!currentSendTransfer) processSendQueue();
         }
 
         function processSendQueue() {
             if (currentSendTransfer || fileSendQueue.length === 0) return;
             currentSendTransfer = fileSendQueue.shift();
-            updateFileQueueUI(true);
+            addTransferToQueueUI(currentSendTransfer.id, currentSendTransfer.file.name, true);
             const payload = { type: 'file-request', id: currentSendTransfer.id, name: currentSendTransfer.file.name, size: currentSendTransfer.file.size, fileType: currentSendTransfer.file.type, senderId: myPeerId, senderName: myDeviceName };
             broadcast(payload);
         }
@@ -426,57 +414,60 @@
         function handleFileRejected(data, conn) {
             if (!currentSendTransfer || currentSendTransfer.id !== data.id) return;
             showNotification(`${conn.metadata.deviceName} declined the file.`, 'info');
-            // In a direct connection, a rejection means the transfer is over.
             if (connectionMode === 'direct') {
                 updateTransferProgressUI(data.id, { status: 'Declined' });
                 currentSendTransfer = null;
-                processSendQueue(); // Check for more files in queue
+                processSendQueue();
             }
         }
 
         function sendFile(transfer, connection) {
             const { file, id } = transfer;
             let chunkIndex = 0;
-            const CHUNK_SIZE = 262144;
+            const CHUNK_SIZE = 64 * 1024; // 64KB chunks for better reliability
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let startTime = Date.now();
             let bytesSent = 0;
 
-            const sendNextChunk = () => {
-                if (chunkIndex >= totalChunks) {
-                    updateTransferProgressUI(id, { progress: 100, status: 'Sent!' });
-                    if(id === currentSendTransfer?.id){
-                        currentSendTransfer = null;
-                        processSendQueue();
+            const reader = new FileReader();
+
+            reader.onload = (e) => {
+                try {
+                    connection.send({ type: 'file-chunk', payload: e.target.result, transferId: id, chunkIndex: chunkIndex });
+                    
+                    bytesSent += e.target.result.length;
+                    const progress = (bytesSent / file.size) * 100;
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
+                    const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName || 'peer'}`;
+                    updateTransferProgressUI(id, { progress, speed, status });
+                    
+                    chunkIndex++;
+                    if (chunkIndex < totalChunks) {
+                        sendNextChunk();
+                    } else {
+                        updateTransferProgressUI(id, { progress: 100, status: 'Sent!' });
+                        if(id === currentSendTransfer?.id) {
+                            currentSendTransfer = null;
+                            processSendQueue();
+                        }
                     }
-                    return;
-                }
+                } catch (err) { console.error('Error sending chunk:', err); }
+            };
+
+            const sendNextChunk = () => {
                 const start = chunkIndex * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, file.size);
-                
-                file.slice(start, end).arrayBuffer().then(chunk => {
-                    try {
-                        connection.send({ type: 'file-chunk', payload: chunk, transferId: id });
-
-                        bytesSent += chunk.byteLength;
-                        const progress = (bytesSent / file.size) * 100;
-                        const elapsed = (Date.now() - startTime) / 1000;
-                        const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
-                        const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName || 'peer'}`;
-                        updateTransferProgressUI(id, { progress, speed, status });
-                        chunkIndex++;
-                        setTimeout(sendNextChunk, 0); 
-                    } catch (err) { console.error('Error sending chunk:', err); }
-                });
+                reader.readAsDataURL(file.slice(start, end));
             };
+
             sendNextChunk();
         }
 
         function handleFileRequest(metadata, conn) {
-            if (metadata.senderId === myPeerId) return;
-            if (document.getElementById('fileReceiveModal').classList.contains('show')) return;
+            if (metadata.senderId === myPeerId || document.getElementById('fileReceiveModal').classList.contains('show')) return;
             
-            const transfer = { metadata, conn, chunks: [], receivedSize: 0, accepted: false };
+            const transfer = { metadata, conn, chunks: [], receivedSize: 0 };
             pendingFileTransfers.set(metadata.id, transfer);
 
             document.getElementById('fileReceiveSubtext').textContent = connectionMode === 'direct' ? 'A peer wants to send you a file:' : 'A peer in the room wants to send a file:';
@@ -496,7 +487,6 @@
             const transferId = document.getElementById('fileReceiveModal').dataset.transferId;
             const transfer = pendingFileTransfers.get(transferId);
             if (transfer) {
-                transfer.accepted = true;
                 transfer.startTime = Date.now();
                 transfer.conn.send({ type: 'file-accepted', id: transferId });
                 addTransferToQueueUI(transferId, transfer.metadata.name);
@@ -505,18 +495,32 @@
         }
 
         function declineFile() {
-             const transferId = document.getElementById('fileReceiveModal').dataset.transferId;
-             const transfer = pendingFileTransfers.get(transferId);
+            const transferId = document.getElementById('fileReceiveModal').dataset.transferId;
+            const transfer = pendingFileTransfers.get(transferId);
             if (transfer) {
-                 transfer.conn.send({ type: 'file-rejected', id: transferId });
-                 pendingFileTransfers.delete(transferId);
+                transfer.conn.send({ type: 'file-rejected', id: transferId });
+                pendingFileTransfers.delete(transferId);
             }
             document.getElementById('fileReceiveModal').classList.remove('show');
         }
+
+        // Helper to convert Base64 to ArrayBuffer
+        function base64ToArrayBuffer(base64) {
+            const binary_string = window.atob(base64.split(',')[1]);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
         
-        function receiveChunk(arrayBuffer, transferId, conn) {
+        function receiveChunk(data, conn) {
+            const { payload, transferId } = data;
             const transfer = pendingFileTransfers.get(transferId);
-            if (!transfer || !transfer.accepted || conn.peer !== transfer.metadata.senderId) return;
+            if (!transfer || conn.peer !== transfer.metadata.senderId) return;
+
+            const arrayBuffer = base64ToArrayBuffer(payload);
             
             transfer.chunks.push(arrayBuffer);
             transfer.receivedSize += arrayBuffer.byteLength;
@@ -530,6 +534,7 @@
                 completeFileReceive(transferId);
             }
         }
+
 
         function completeFileReceive(transferId) {
             const transfer = pendingFileTransfers.get(transferId);
@@ -611,16 +616,22 @@
             document.getElementById('qrScannerTitle').textContent = `Scan ${mode === 'direct' ? 'Peer' : 'Room'} QR Code`;
             document.getElementById('qrScannerModal').classList.add('show');
             html5QrCode = new Html5Qrcode("qr-reader");
-            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, (decodedText) => {
-                closeQRScanner(); // Close immediately on successful scan
-                if (qrScannerMode === 'direct') {
-                    document.getElementById('remotePeerIdInput').value = decodedText;
-                    connectToPeer();
-                } else {
-                    document.getElementById('roomCodeInput').value = decodedText;
-                    joinRoom();
-                }
-            }).catch(err => { console.error("QR Scanner error:", err); showNotification("Camera error.", 'error'); closeQRScanner(); });
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, 
+                (decodedText) => {
+                    closeQRScanner();
+                    if (qrScannerMode === 'direct') {
+                        document.getElementById('remotePeerIdInput').value = decodedText;
+                        connectToPeer();
+                    } else {
+                        document.getElementById('roomCodeInput').value = decodedText;
+                        joinRoom();
+                    }
+                })
+            .catch(err => { 
+                console.error("QR Scanner error:", err); 
+                showNotification("Camera error.", 'error'); 
+                closeQRScanner(); 
+            });
         }
 
         function closeQRScanner() {
@@ -647,6 +658,7 @@
         }
 
         function showTransferWindow() {
+            closeQRScanner();
             document.getElementById('homeScreen').classList.add('hidden');
             document.getElementById('transferWindow').classList.remove('hidden');
             const header = document.getElementById('transferHeader');
@@ -697,9 +709,9 @@
             let html = `<div class="p-2 bg-blue-50 rounded-lg text-sm font-bold text-blue-700">${myDeviceName} (You${isHost ? ', Host' : ''})</div>`;
             
             Object.values(connections).forEach(conn => {
-                if (!conn || !conn.metadata) return;
+                if (!conn || !conn.metadata || conn.peer === myPeerId) return;
                 const name = conn.metadata.deviceName || 'Unknown';
-                const kickButton = isHost && conn.peer !== myPeerId ? `<button onclick="kickPeer('${conn.peer}')" class="text-red-500 hover:text-red-700 text-xs font-bold">Kick</button>` : '';
+                const kickButton = isHost ? `<button onclick="kickPeer('${conn.peer}')" class="text-red-500 hover:text-red-700 text-xs font-bold">Kick</button>` : '';
                 html += `<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-sm text-slate-700"><span>${name}</span> ${kickButton}</div>`;
             });
 
@@ -735,14 +747,13 @@
         function updateFileQueueUI(isNewTransfer = false) {
             const queueDiv = document.getElementById('fileQueue');
             
-            if(isNewTransfer){
-                const item = fileSendQueue[0];
-                if (!document.getElementById(`transfer-progress-${item.id}`)) {
-                    addTransferToQueueUI(item.id, item.file.name, true);
+            if (isNewTransfer && currentSendTransfer) {
+                if (!document.getElementById(`transfer-progress-${currentSendTransfer.id}`)) {
+                    addTransferToQueueUI(currentSendTransfer.id, currentSendTransfer.file.name, true);
                 }
             } else {
                  const activeTransfers = document.querySelectorAll('[id^="transfer-progress-"]');
-                 if(fileSendQueue.length === 0 && activeTransfers.length === 0) {
+                 if (fileSendQueue.length === 0 && activeTransfers.length === 0) {
                     queueDiv.innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
                 }
             }
