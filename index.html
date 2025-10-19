@@ -150,7 +150,7 @@
                         <div id="transferProgressBar" class="bg-blue-600 h-3 rounded-full transition-all" style="width: 0%"></div>
                     </div>
                     <div class="flex justify-between text-xs text-slate-500">
-                        <span id="transferSpeed">0 KB/s</span>
+                        <span id="transferSpeed">0 MB/s</span>
                         <span id="transferStatus">Preparing...</span>
                     </div>
                 </div>
@@ -248,7 +248,7 @@
             }
         }
 
-        // Initialize PeerJS
+        // Initialize PeerJS with larger chunk size
         function initPeer() {
             loadDeviceName();
             
@@ -311,7 +311,9 @@
             }
 
             const conn = peer.connect(remotePeerId, {
-                metadata: { deviceName: myDeviceName }
+                metadata: { deviceName: myDeviceName },
+                serialization: 'binary',
+                reliable: true
             });
             handleConnection(conn);
         }
@@ -326,7 +328,7 @@
             conn.on('data', (data) => {
                 if (data.type === 'file') {
                     handleFileMetadata(data, conn);
-                } else if (data.type === 'chunk') {
+                } else if (data instanceof ArrayBuffer) {
                     receiveChunk(data, conn);
                 }
             });
@@ -354,13 +356,11 @@
             const dropZone = document.getElementById('dropZone');
             const fileInput = document.getElementById('fileInput');
             
-            // Remove all existing listeners by cloning
             const newDropZone = dropZone.cloneNode(true);
             dropZone.parentNode.replaceChild(newDropZone, dropZone);
             
             const newFileInput = document.getElementById('fileInput');
             
-            // Add drag and drop
             newDropZone.addEventListener('dragover', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -382,11 +382,10 @@
                 }
             });
             
-            // File input change
             newFileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
                     sendFile(e.target.files[0]);
-                    e.target.value = ''; // Reset
+                    e.target.value = '';
                 }
             });
         }
@@ -403,15 +402,15 @@
             showNotification('Connection closed', 'info');
         }
 
-        // File Sending
-        const CHUNK_SIZE = 16384;
+        // Optimized File Sending - Much larger chunk size for speed
+        const CHUNK_SIZE = 262144; // 256 KB chunks for much faster transfer
 
         function sendFile(file) {
             if (!file || !currentConnection) return;
             
             showTransferProgress(file.name);
             
-            // Send file metadata
+            // Send file metadata first
             currentConnection.send({
                 type: 'file',
                 name: file.name,
@@ -419,12 +418,13 @@
                 fileType: file.type
             });
 
-            // Start sending chunks immediately
+            // Start sending chunks immediately with optimized speed
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let chunkIndex = 0;
             let startTime = Date.now();
+            let bytesSent = 0;
 
-            function sendNextChunk() {
+            const sendNextChunk = () => {
                 if (chunkIndex >= totalChunks) {
                     hideTransferProgress();
                     addToHistory('Sent: ' + file.name, 'send');
@@ -439,42 +439,41 @@
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
-                        currentConnection.send({
-                            type: 'chunk',
-                            data: e.target.result,
-                            index: chunkIndex,
-                            total: totalChunks,
-                            fileName: file.name
-                        });
-
+                        currentConnection.send(e.target.result);
+                        
+                        bytesSent += chunk.size;
                         const progress = ((chunkIndex + 1) / totalChunks) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
-                        const speed = (((chunkIndex + 1) * CHUNK_SIZE) / 1024) / elapsed;
+                        const speed = (bytesSent / 1024 / 1024) / elapsed; // MB/s
 
                         updateTransferProgress(progress, speed, 'Sending');
                         
                         chunkIndex++;
-                        setTimeout(sendNextChunk, 1);
+                        
+                        // No delay - send immediately for maximum speed
+                        if (chunkIndex < totalChunks) {
+                            sendNextChunk();
+                        }
                     } catch (e) {
                         console.error('Error sending chunk:', e);
                         showNotification('Error sending file', 'error');
                     }
                 };
                 reader.readAsArrayBuffer(chunk);
-            }
+            };
 
             sendNextChunk();
         }
 
-        // File Receiving
+        // Optimized File Receiving
         function handleFileMetadata(metadata, conn) {
             receiveFileTransfer = {
                 metadata: metadata,
                 conn: conn,
                 chunks: [],
-                totalChunks: 0,
-                receivedChunks: 0,
-                accepted: false
+                receivedSize: 0,
+                accepted: false,
+                startTime: null
             };
 
             document.getElementById('fileReceiveName').textContent = metadata.name;
@@ -498,6 +497,7 @@
             
             if (receiveFileTransfer) {
                 receiveFileTransfer.accepted = true;
+                receiveFileTransfer.startTime = Date.now();
                 showTransferProgress(receiveFileTransfer.metadata.name);
                 showNotification('Receiving file...', 'info');
             }
@@ -514,18 +514,26 @@
                 return;
             }
 
-            if (receiveFileTransfer.metadata.name !== data.fileName) {
-                return;
+            // Store chunk
+            receiveFileTransfer.chunks.push(data);
+            receiveFileTransfer.receivedSize += data.byteLength;
+
+            const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
+            const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
+            const speed = (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed; // MB/s
+            
+            updateTransferProgress(progress, speed, 'Receiving');
+
+            // Check if transfer complete
+            if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) {
+                completeFileReceive();
             }
+        }
 
-            receiveFileTransfer.chunks[data.index] = data.data;
-            receiveFileTransfer.receivedChunks++;
-            receiveFileTransfer.totalChunks = data.total;
-
-            const progress = (receiveFileTransfer.receivedChunks / receiveFileTransfer.totalChunks) * 100;
-            updateTransferProgress(progress, 0, 'Receiving');
-
-            if (receiveFileTransfer.receivedChunks === receiveFileTransfer.totalChunks) {
+        function completeFileReceive() {
+            if (!receiveFileTransfer) return;
+            
+            try {
                 const blob = new Blob(receiveFileTransfer.chunks, { type: receiveFileTransfer.metadata.fileType });
                 const url = URL.createObjectURL(blob);
                 
@@ -535,11 +543,16 @@
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                
+                setTimeout(() => URL.revokeObjectURL(url), 100);
                 
                 hideTransferProgress();
                 addToHistory('Received: ' + receiveFileTransfer.metadata.name, 'receive');
                 showNotification('File received successfully!', 'success');
+                receiveFileTransfer = null;
+            } catch (e) {
+                console.error('Error completing file receive:', e);
+                showNotification('Error completing file download', 'error');
                 receiveFileTransfer = null;
             }
         }
@@ -556,9 +569,7 @@
         function updateTransferProgress(percent, speed, status) {
             document.getElementById('transferProgressBar').style.width = percent + '%';
             document.getElementById('transferPercent').textContent = Math.round(percent) + '%';
-            if (speed > 0) {
-                document.getElementById('transferSpeed').textContent = Math.round(speed) + ' KB/s';
-            }
+            document.getElementById('transferSpeed').textContent = speed.toFixed(2) + ' MB/s';
             document.getElementById('transferStatus').textContent = status;
         }
 
