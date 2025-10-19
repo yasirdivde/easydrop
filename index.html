@@ -226,6 +226,7 @@
         let currentConnection = null;
         let html5QrCode = null;
         let receiveFileTransfer = null;
+        let pendingSendFile = null; // File waiting for approval
 
         // Load device name from localStorage
         function loadDeviceName() {
@@ -248,7 +249,7 @@
             }
         }
 
-        // Initialize PeerJS with larger chunk size
+        // Initialize PeerJS
         function initPeer() {
             loadDeviceName();
             
@@ -326,8 +327,13 @@
             });
 
             conn.on('data', (data) => {
-                if (data.type === 'file') {
-                    handleFileMetadata(data, conn);
+                // Handle different message types
+                if (data.type === 'file-request') {
+                    handleFileRequest(data, conn);
+                } else if (data.type === 'file-accepted') {
+                    handleFileAccepted(data, conn);
+                } else if (data.type === 'file-rejected') {
+                    handleFileRejected(data, conn);
                 } else if (data instanceof ArrayBuffer) {
                     receiveChunk(data, conn);
                 }
@@ -378,13 +384,13 @@
                 e.stopPropagation();
                 newDropZone.classList.remove('border-blue-500', 'bg-blue-50');
                 if (e.dataTransfer.files.length > 0) {
-                    sendFile(e.dataTransfer.files[0]);
+                    requestFileTransfer(e.dataTransfer.files[0]);
                 }
             });
             
             newFileInput.addEventListener('change', (e) => {
                 if (e.target.files.length > 0) {
-                    sendFile(e.target.files[0]);
+                    requestFileTransfer(e.target.files[0]);
                     e.target.value = '';
                 }
             });
@@ -399,26 +405,49 @@
             document.getElementById('transferWindow').classList.add('hidden');
             document.getElementById('transferHistory').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No transfers yet</p>';
             receiveFileTransfer = null;
+            pendingSendFile = null;
             showNotification('Connection closed', 'info');
         }
 
-        // Optimized File Sending - Much larger chunk size for speed
-        const CHUNK_SIZE = 262144; // 256 KB chunks for much faster transfer
+        // SENDER SIDE - Request file transfer and wait for approval
+        const CHUNK_SIZE = 262144; // 256KB
 
-        function sendFile(file) {
+        function requestFileTransfer(file) {
             if (!file || !currentConnection) return;
             
-            showTransferProgress(file.name);
+            // Store file for later
+            pendingSendFile = file;
             
-            // Send file metadata first
+            // Send request to receiver
             currentConnection.send({
-                type: 'file',
+                type: 'file-request',
                 name: file.name,
                 size: file.size,
                 fileType: file.type
             });
 
-            // Start sending chunks immediately with optimized speed
+            showTransferProgress(file.name);
+            updateTransferProgress(0, 0, 'Waiting for approval...');
+        }
+
+        function handleFileAccepted(data, conn) {
+            if (!pendingSendFile) return;
+            
+            // Receiver accepted! Start sending
+            sendFile(pendingSendFile);
+        }
+
+        function handleFileRejected(data, conn) {
+            if (!pendingSendFile) return;
+            
+            hideTransferProgress();
+            showNotification('File transfer rejected by recipient', 'error');
+            pendingSendFile = null;
+        }
+
+        function sendFile(file) {
+            if (!file || !currentConnection) return;
+            
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let chunkIndex = 0;
             let startTime = Date.now();
@@ -429,6 +458,7 @@
                     hideTransferProgress();
                     addToHistory('Sent: ' + file.name, 'send');
                     showNotification('File sent successfully!', 'success');
+                    pendingSendFile = null;
                     return;
                 }
 
@@ -444,19 +474,19 @@
                         bytesSent += chunk.size;
                         const progress = ((chunkIndex + 1) / totalChunks) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
-                        const speed = (bytesSent / 1024 / 1024) / elapsed; // MB/s
+                        const speed = (bytesSent / 1024 / 1024) / elapsed;
 
                         updateTransferProgress(progress, speed, 'Sending');
                         
                         chunkIndex++;
                         
-                        // No delay - send immediately for maximum speed
                         if (chunkIndex < totalChunks) {
                             sendNextChunk();
                         }
                     } catch (e) {
                         console.error('Error sending chunk:', e);
                         showNotification('Error sending file', 'error');
+                        pendingSendFile = null;
                     }
                 };
                 reader.readAsArrayBuffer(chunk);
@@ -465,14 +495,13 @@
             sendNextChunk();
         }
 
-        // Optimized File Receiving
-        function handleFileMetadata(metadata, conn) {
+        // RECEIVER SIDE - Show modal and send response
+        function handleFileRequest(metadata, conn) {
             receiveFileTransfer = {
                 metadata: metadata,
                 conn: conn,
                 chunks: [],
                 receivedSize: 0,
-                accepted: false,
                 startTime: null
             };
 
@@ -496,7 +525,12 @@
             document.getElementById('fileReceiveModal').classList.remove('show');
             
             if (receiveFileTransfer) {
-                receiveFileTransfer.accepted = true;
+                // Send acceptance to sender
+                currentConnection.send({
+                    type: 'file-accepted',
+                    fileName: receiveFileTransfer.metadata.name
+                });
+                
                 receiveFileTransfer.startTime = Date.now();
                 showTransferProgress(receiveFileTransfer.metadata.name);
                 showNotification('Receiving file...', 'info');
@@ -505,26 +539,34 @@
 
         function declineFile() {
             document.getElementById('fileReceiveModal').classList.remove('show');
-            receiveFileTransfer = null;
-            showNotification('File transfer declined', 'info');
+            
+            if (receiveFileTransfer) {
+                // Send rejection to sender
+                currentConnection.send({
+                    type: 'file-rejected',
+                    fileName: receiveFileTransfer.metadata.name
+                });
+                
+                receiveFileTransfer = null;
+                showNotification('File transfer declined', 'info');
+            }
         }
 
         function receiveChunk(data, conn) {
-            if (!receiveFileTransfer || !receiveFileTransfer.accepted) {
-                return;
+            if (!receiveFileTransfer || !receiveFileTransfer.startTime) {
+                return; // Ignore chunks if not accepted
             }
 
-            // Store chunk
             receiveFileTransfer.chunks.push(data);
             receiveFileTransfer.receivedSize += data.byteLength;
 
             const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
             const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
-            const speed = (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed; // MB/s
+            const speed = (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed;
             
             updateTransferProgress(progress, speed, 'Receiving');
 
-            // Check if transfer complete
+            // Check if complete
             if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) {
                 completeFileReceive();
             }
