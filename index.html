@@ -296,7 +296,7 @@
                 'red': 'text-red-600',
                 'orange': 'text-orange-600'
             };
-            status.innerHTML = `<i class="fas fa-circle ${colors[color]} online mr-1"></i>${text}`;
+            status.innerHTML = `<i class="fas fa-circle ${colors[color] || 'text-gray-400'} ${color === 'green' ? 'online' : ''} mr-1"></i>${text}`;
         }
 
         function connectToPeer() {
@@ -462,8 +462,11 @@
             let bytesSent = 0;
 
             const sendNextChunk = () => {
+                // This is the completion condition.
+                // When the last chunk has been sent, chunkIndex will equal totalChunks.
                 if (chunkIndex >= totalChunks) {
-                    hideTransferProgress();
+                    // We don't hide progress immediately, to show 100%
+                    // hideTransferProgress();
                     addToHistory('Sent: ' + file.name, 'send');
                     showNotification('File sent successfully!', 'success');
                     pendingSendFile = null;
@@ -480,17 +483,21 @@
                         currentConnection.send(e.target.result);
                         
                         bytesSent += chunk.size;
-                        const progress = ((chunkIndex + 1) / totalChunks) * 100;
+                        const progress = (bytesSent / file.size) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
-                        const speed = (bytesSent / 1024 / 1024) / elapsed;
+                        const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
 
                         updateTransferProgress(progress, speed, 'Sending');
                         
                         chunkIndex++;
                         
-                        if (chunkIndex < totalChunks) {
-                            sendNextChunk();
-                        }
+                        // *** FIX ***
+                        // Instead of calling sendNextChunk() directly, we use setTimeout.
+                        // This yields to the browser's event loop, giving the WebRTC
+                        // data channel time to send the buffered data and preventing a stall.
+                        // This also fixes a bug where the completion condition was not reached.
+                        setTimeout(sendNextChunk, 0);
+
                     } catch (e) {
                         console.error('Error sending chunk:', e);
                         showNotification('Error sending file', 'error');
@@ -500,6 +507,7 @@
                 reader.readAsArrayBuffer(chunk);
             };
 
+            // Start the sending process
             sendNextChunk();
         }
 
@@ -589,7 +597,7 @@
 
             const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
             const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
-            const speed = (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed;
+            const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
             
             console.log(`Receiving: ${progress.toFixed(2)}% - ${receiveFileTransfer.receivedSize} / ${receiveFileTransfer.metadata.size} bytes`);
             updateTransferProgress(progress, speed, 'Receiving');
@@ -682,7 +690,7 @@
             html5QrCode = new Html5Qrcode("qr-reader");
             html5QrCode.start(
                 { facingMode: "environment" },
-                { fps: 10, qrbox: 250 },
+                { fps: 10, qrbox: {width: 250, height: 250} },
                 (decodedText) => {
                     document.getElementById('remotePeerId').value = decodedText;
                     closeQRScanner();
@@ -695,7 +703,7 @@
         }
 
         function closeQRScanner() {
-            if (html5QrCode) {
+            if (html5QrCode && html5QrCode.isScanning) {
                 html5QrCode.stop().then(() => {
                     html5QrCode.clear();
                     html5QrCode = null;
