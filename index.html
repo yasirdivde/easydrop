@@ -47,15 +47,6 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Your Peer ID -->
-            <div class="bg-white rounded-lg p-3 md:p-4 inline-block shadow-lg max-w-full mx-4">
-                <p class="text-xs md:text-sm text-slate-600 mb-2">Your Peer ID:</p>
-                <div class="flex items-center gap-2 flex-wrap justify-center">
-                    <code id="myPeerId" class="text-sm md:text-lg font-mono font-bold text-blue-600 bg-slate-100 px-3 md:px-4 py-2 rounded break-all">Initializing...</code>
-                </div>
-            </div>
-
             <!-- Connection Status -->
             <div class="mt-4">
                 <span id="connectionStatus" class="text-xs md:text-sm text-slate-500">
@@ -64,22 +55,47 @@
             </div>
         </div>
 
-        <!-- Room Section -->
-        <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 mb-6 md:mb-8 max-w-lg mx-auto">
-            <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
-                <i class="fas fa-users text-blue-600 mr-2"></i>Join or Create a Room
-            </h3>
-            <div class="flex flex-col sm:flex-row gap-2">
-                <input type="text" id="roomCodeInput" placeholder="Enter Room Code..." 
-                    class="flex-1 border border-slate-300 rounded-lg px-4 py-3 focus:outline-none focus:border-blue-500 text-sm md:text-base">
-                <button onclick="joinRoom()" class="bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700 transition-all whitespace-nowrap">
-                    <i class="fas fa-sign-in-alt mr-2"></i>Join Room
+        <!-- Connection Mode Selection -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Direct P2P Connection -->
+            <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
+                <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
+                    <i class="fas fa-user text-purple-600 mr-2"></i>Direct P2P Connection
+                </h3>
+                <div class="bg-slate-50 rounded-lg p-3 mb-4">
+                    <p class="text-xs text-slate-600 mb-1">Your Direct ID:</p>
+                    <div class="flex items-center gap-2">
+                        <code id="myPeerId" class="flex-1 text-sm font-mono font-bold text-purple-700 bg-slate-200 px-3 py-2 rounded break-all">Initializing...</code>
+                        <button onclick="copyMyId()" class="text-purple-600 hover:text-purple-700" title="Copy ID"><i class="fas fa-copy"></i></button>
+                        <button onclick="showMyIdQr()" class="text-purple-600 hover:text-purple-700" title="Show QR"><i class="fas fa-qrcode"></i></button>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-2">
+                    <input type="text" id="remotePeerIdInput" placeholder="Enter Peer's Direct ID..." class="flex-1 border border-slate-300 rounded-lg px-4 py-3">
+                    <div class="flex gap-2">
+                         <button onclick="openQRScanner('direct')" class="flex-1 bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700"><i class="fas fa-camera mr-2"></i>Scan</button>
+                         <button onclick="connectToPeer()" class="flex-1 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700"><i class="fas fa-link mr-2"></i>Connect</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Room Connection -->
+            <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
+                 <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
+                    <i class="fas fa-users text-blue-600 mr-2"></i>Rooms (Group)
+                </h3>
+                 <div class="flex flex-col gap-2">
+                    <input type="text" id="roomCodeInput" placeholder="Enter Room Code..." class="flex-1 border border-slate-300 rounded-lg px-4 py-3">
+                    <div class="flex gap-2">
+                        <button onclick="openQRScanner('room')" class="flex-1 bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700"><i class="fas fa-camera mr-2"></i>Scan</button>
+                        <button onclick="joinRoom()" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700"><i class="fas fa-sign-in-alt mr-2"></i>Join</button>
+                    </div>
+                </div>
+                <div class="text-center my-2 text-slate-500 text-sm">OR</div>
+                <button onclick="createRoom()" class="w-full bg-blue-800 text-white px-6 py-3 rounded-lg hover:bg-blue-900">
+                    <i class="fas fa-plus-circle mr-2"></i>Create New Room
                 </button>
             </div>
-            <div class="text-center my-2 text-slate-500 text-sm">OR</div>
-            <button onclick="createRoom()" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-all whitespace-nowrap">
-                <i class="fas fa-plus-circle mr-2"></i>Create New Room
-            </button>
         </div>
 
         <!-- Footer -->
@@ -89,92 +105,74 @@
         </div>
     </div>
 
-    <!-- Transfer Window (Hidden by default) -->
+    <!-- Transfer Window (Dynamically adapted) -->
     <div id="transferWindow" class="hidden container mx-auto px-4 py-4 md:py-8 max-w-7xl">
         
         <!-- Header -->
-        <div class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-4 md:p-6 mb-6 text-white">
-            <div class="flex flex-col md:flex-row items-center justify-between gap-4">
-                <div class="flex items-center gap-4">
-                    <div class="bg-white text-blue-600 w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center">
-                        <i class="fas fa-users text-2xl md:text-3xl"></i>
-                    </div>
-                    <div>
-                        <h2 class="text-xl md:text-2xl font-bold">Room Code: <span id="roomCodeDisplay" class="font-mono"></span></h2>
-                        <p id="connectedDeviceName" class="text-sm md:text-base opacity-90">Your Name: My Device</p>
-                        <p id="connectedDeviceId" class="text-xs opacity-75 font-mono">Your ID: ...</p>
-                    </div>
-                </div>
-                 <button onclick="copyRoomCode()" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-all whitespace-nowrap">
-                    <i class="fas fa-copy mr-2"></i>Copy Room Code
-                </button>
-                <button onclick="leaveRoom()" class="bg-red-500 text-white px-4 md:px-6 py-2 md:py-3 rounded-lg hover:bg-red-600 transition-all whitespace-nowrap">
-                    <i class="fas fa-door-open mr-2"></i>Leave Room
-                </button>
-            </div>
+        <div id="transferHeader" class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-4 md:p-6 mb-6 text-white">
+           <!-- Content generated by JS -->
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <!-- Left Column: File Transfer -->
             <div class="lg:col-span-2 flex flex-col gap-6">
                 <!-- Send File Section -->
                 <div class="bg-white rounded-2xl shadow-lg p-4 md:p-8">
-                    <h3 class="text-xl md:text-2xl font-bold text-slate-800 mb-4 md:mb-6 text-center">
-                        <i class="fas fa-paper-plane text-blue-600 mr-2"></i>Send Files to Room
-                    </h3>
-                    
+                    <h3 id="sendFileTitle" class="text-xl md:text-2xl font-bold text-slate-800 mb-4 md:mb-6 text-center"></h3>
                     <div id="dropZone" class="border-3 border-dashed border-slate-300 rounded-xl p-8 md:p-12 text-center cursor-pointer hover:border-blue-400 transition-all">
                         <i class="fas fa-cloud-upload-alt text-5xl md:text-6xl text-slate-400 mb-4"></i>
                         <p class="text-lg md:text-xl text-slate-700 mb-2">Drag & Drop files here</p>
                         <p class="text-sm text-slate-500 mb-4">or</p>
-                        <label for="fileInput" class="bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 transition-all inline-block">
-                            <i class="fas fa-folder-open mr-2"></i>Browse Files
-                        </label>
+                        <label for="fileInput" class="bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 transition-all inline-block"><i class="fas fa-folder-open mr-2"></i>Browse Files</label>
                         <input type="file" id="fileInput" class="hidden" multiple>
                     </div>
                 </div>
                 <!-- File Queue / Progress -->
-                <div id="fileQueueContainer" class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
-                     <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
-                        <i class="fas fa-tasks text-blue-600 mr-2"></i>Transfer Queue
-                    </h3>
-                    <div id="fileQueue" class="space-y-3">
-                         <p class="text-sm text-slate-400 text-center py-4">No active transfers</p>
-                    </div>
+                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
+                     <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4"><i class="fas fa-tasks text-blue-600 mr-2"></i>Transfer Queue</h3>
+                    <div id="fileQueue" class="space-y-3"><p class="text-sm text-slate-400 text-center py-4">No active transfers</p></div>
                 </div>
             </div>
 
-            <!-- Right Column: Chat, Peers, History -->
+            <!-- Right Column: Chat, Peers -->
             <div class="flex flex-col gap-6">
-                 <!-- Connected Peers -->
-                <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6">
-                    <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
-                        <i class="fas fa-user-friends text-purple-600 mr-2"></i>Connected Peers
-                    </h3>
-                    <div id="peerList" class="space-y-2 max-h-40 overflow-y-auto">
-                        <!-- Peer list will be populated here -->
-                    </div>
+                 <!-- Connected Peers (Room mode only) -->
+                <div id="peerListContainer" class="bg-white rounded-2xl shadow-lg p-4 md:p-6 hidden">
+                    <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4"><i class="fas fa-user-friends text-purple-600 mr-2"></i>Connected Peers</h3>
+                    <div id="peerList" class="space-y-2 max-h-40 overflow-y-auto"></div>
                 </div>
                 <!-- Chat -->
                 <div class="bg-white rounded-2xl shadow-lg p-4 md:p-6 flex flex-col h-[60vh] min-h-[400px]">
-                    <h3 class="text-lg md:text-xl font-bold text-slate-800 mb-4">
-                        <i class="fas fa-comments text-green-600 mr-2"></i>Room Chat
-                    </h3>
-                    <div id="chatMessages" class="flex-1 overflow-y-auto bg-slate-50 rounded-lg p-3 flex flex-col gap-2 mb-4">
-                        <!-- Messages will appear here -->
-                    </div>
+                    <h3 id="chatTitle" class="text-lg md:text-xl font-bold text-slate-800 mb-4"></h3>
+                    <div id="chatMessages" class="flex-1 overflow-y-auto bg-slate-50 rounded-lg p-3 flex flex-col gap-2 mb-4"></div>
                     <div class="flex gap-2">
-                        <input type="text" id="chatInput" class="flex-1 border border-slate-300 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500" placeholder="Type a message...">
-                        <button onclick="sendChatMessage()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
-                            <i class="fas fa-paper-plane"></i>
-                        </button>
+                        <input type="text" id="chatInput" class="flex-1 border border-slate-300 rounded-lg px-4 py-2" placeholder="Type a message...">
+                        <button onclick="sendChatMessage()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"><i class="fas fa-paper-plane"></i></button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+    
+    <!-- Generic QR Code Modal -->
+    <div id="qrModal" class="modal">
+        <div class="modal-content bg-white rounded-2xl shadow-2xl p-4 md:p-6 max-w-sm w-full mx-4 text-center">
+            <h3 id="qrModalTitle" class="text-lg md:text-xl font-bold text-slate-800 mb-4"></h3>
+            <div id="qrcodeContainer" class="inline-block p-4 bg-white rounded-lg"></div>
+            <p class="font-mono text-lg my-2" id="qrCodeText"></p>
+            <button onclick="closeQR()" class="mt-4 bg-slate-200 text-slate-700 px-6 py-2 rounded-lg">Close</button>
+        </div>
+    </div>
 
-    <!-- QR Scanner Modal (Removed as we are not using 1-to-1 QR scanning) -->
+    <!-- QR Scanner Modal -->
+    <div id="qrScannerModal" class="modal">
+        <div class="modal-content bg-white rounded-2xl shadow-2xl p-4 md:p-6 max-w-lg w-full mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="qrScannerTitle" class="text-lg md:text-xl font-bold text-slate-800"></h3>
+                <button onclick="closeQRScanner()" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times text-2xl"></i></button>
+            </div>
+            <div id="qr-reader" class="rounded-lg overflow-hidden w-full"></div>
+        </div>
+    </div>
 
     <!-- File Receive Confirmation Modal -->
     <div id="fileReceiveModal" class="modal">
@@ -184,27 +182,21 @@
                     <i class="fas fa-file-download text-3xl text-blue-600"></i>
                 </div>
                 <h3 class="text-xl font-bold text-slate-800 mb-2">Incoming File</h3>
-                <p class="text-sm md:text-base text-slate-600">A peer in the room wants to send a file:</p>
+                <p id="fileReceiveSubtext" class="text-sm md:text-base text-slate-600"></p>
             </div>
-            
             <div class="bg-slate-50 rounded-lg p-4 mb-6">
                 <div class="flex items-center gap-3">
                     <i id="fileReceiveIcon" class="fas fa-file text-3xl text-blue-600"></i>
                     <div class="flex-1 min-w-0">
-                        <p id="fileReceiveName" class="font-bold text-slate-800 truncate">filename.txt</p>
-                        <p id="fileReceiveSize" class="text-sm text-slate-500">1.2 MB</p>
-                        <p id="fileReceiveFrom" class="text-xs text-slate-400 mt-1">From: Device-abc1</p>
+                        <p id="fileReceiveName" class="font-bold text-slate-800 truncate"></p>
+                        <p id="fileReceiveSize" class="text-sm text-slate-500"></p>
+                        <p id="fileReceiveFrom" class="text-xs text-slate-400 mt-1"></p>
                     </div>
                 </div>
             </div>
-
             <div class="flex gap-3">
-                <button onclick="declineFile()" class="flex-1 bg-slate-200 text-slate-700 px-4 md:px-6 py-3 rounded-lg hover:bg-slate-300 transition-all font-medium">
-                    <i class="fas fa-times mr-2"></i>Decline
-                </button>
-                <button onclick="acceptFile()" class="flex-1 bg-blue-600 text-white px-4 md:px-6 py-3 rounded-lg hover:bg-blue-700 transition-all font-medium">
-                    <i class="fas fa-check mr-2"></i>Accept
-                </button>
+                <button onclick="declineFile()" class="flex-1 bg-slate-200 text-slate-700 px-4 py-3 rounded-lg"><i class="fas fa-times mr-2"></i>Decline</button>
+                <button onclick="acceptFile()" class="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg"><i class="fas fa-check mr-2"></i>Accept</button>
             </div>
         </div>
     </div>
@@ -214,13 +206,14 @@
         let peer;
         let myPeerId;
         let myDeviceName;
+        let connectionMode = null; // 'direct' or 'room'
         let roomCode = null;
         let connections = {}; // { peerId: conn }
         let isHost = false;
-        
+        let html5QrCode = null;
+        let qrScannerMode = null;
         let audioContext;
         
-        // --- File Transfer State ---
         let fileSendQueue = [];
         let currentSendTransfer = null;
         let receiveFileTransfer = null;
@@ -238,16 +231,13 @@
         // --- INITIALIZATION ---
         function initialize() {
             loadDeviceName();
-             // Initialize AudioContext
+            setupPeer(); // Setup the default peer for direct connections
             window.addEventListener('click', () => {
-                if (!audioContext) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
+                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }, { once: true });
-            document.getElementById('myPeerId').textContent = "Not connected";
         }
 
-        function setupPeer(id) {
+        function setupPeer(id = null) {
             if (peer) peer.destroy();
             
             peer = id ? new Peer(id, peerConfig) : new Peer(peerConfig);
@@ -256,63 +246,73 @@
                 myPeerId = id;
                 document.getElementById('myPeerId').textContent = id;
                 updateConnectionStatus('Online', 'green');
-                if (isHost) {
-                    showTransferWindow();
-                } else {
-                    // This is a client joining, now connect to host
-                    const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName, isJoining: true }, reliable: true });
-                    handleConnection(hostConnection);
+                
+                if (connectionMode === 'room') {
+                    if (isHost) {
+                        showTransferWindow();
+                    } else {
+                        const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
+                        handleConnection(hostConnection);
+                    }
                 }
             });
 
             peer.on('connection', handleConnection);
             peer.on('error', (err) => {
                 console.error('Peer error:', err);
-                if(err.type === 'peer-unavailable') {
-                    showNotification(`Room ${roomCode} not found or host is offline.`, 'error');
-                    leaveRoom();
-                } else {
-                    updateConnectionStatus('Error: ' + err.type, 'red');
+                if(err.type === 'peer-unavailable' && connectionMode === 'room') {
+                    showNotification(`Room ${roomCode} not found.`, 'error');
+                    resetToHome();
+                } else if (err.type === 'peer-unavailable' && connectionMode === 'direct') {
+                    showNotification(`Peer not found.`, 'error');
                 }
                 playSound('error');
             });
             peer.on('disconnected', () => { updateConnectionStatus('Reconnecting...', 'orange'); });
             peer.on('close', () => { console.log('Peer destroyed'); });
         }
-
-
-        // --- ROOM MANAGEMENT ---
+        
+        // --- CONNECTION MANAGEMENT ---
+        function connectToPeer() {
+            connectionMode = 'direct';
+            const remoteId = document.getElementById('remotePeerIdInput').value.trim();
+            if (!remoteId) return showNotification("Please enter a Peer's Direct ID", "error");
+            if (remoteId === myPeerId) return showNotification("Cannot connect to yourself.", "error");
+            const conn = peer.connect(remoteId, { metadata: { deviceName: myDeviceName }, reliable: true });
+            handleConnection(conn);
+        }
+        
         function createRoom() {
+            connectionMode = 'room';
             roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
             isHost = true;
             setupPeer(roomCode);
         }
 
         function joinRoom() {
+            connectionMode = 'room';
             const code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
-            if (!code) {
-                showNotification('Please enter a room code.', 'error');
-                return;
-            }
+            if (!code) return showNotification('Please enter a room code.', 'error');
             roomCode = code;
             isHost = false;
-            setupPeer(); // Create peer with random ID
+            setupPeer();
         }
         
-        function leaveRoom() {
-            for (const peerId in connections) {
-                connections[peerId].close();
-            }
+        function leave() {
+            Object.values(connections).forEach(conn => conn.close());
+            if (isHost && peer) peer.destroy(); // Dissolves the room
+            resetToHome();
+        }
+        
+        function resetToHome() {
+            if (peer && !peer.destroyed && !isHost) peer.destroy();
             connections = {};
-            if (peer) peer.destroy();
-            
             isHost = false;
             roomCode = null;
-            
+            connectionMode = null;
             document.getElementById('homeScreen').classList.remove('hidden');
             document.getElementById('transferWindow').classList.add('hidden');
-            document.getElementById('myPeerId').textContent = "Not connected";
-            updateConnectionStatus('Waiting...', 'gray');
+            setupPeer(); // Re-init default peer
         }
 
         function handleConnection(conn) {
@@ -320,12 +320,11 @@
                 console.log(`Connected to ${conn.peer}`);
                 connections[conn.peer] = conn;
                 
-                if (isHost) {
-                    // Tell the new peer about everyone else
+                if (connectionMode === 'direct') {
+                    showTransferWindow();
+                } else if (connectionMode === 'room' && isHost) {
                     const peerIds = Object.keys(connections).filter(id => id !== conn.peer);
                     conn.send({ type: 'room-members', members: peerIds });
-                    
-                    // Tell everyone else about the new peer
                     broadcast({ type: 'new-peer', peerId: conn.peer, deviceName: conn.metadata.deviceName }, conn.peer);
                 }
                 updatePeerListUI();
@@ -334,67 +333,63 @@
             conn.on('data', (data) => handleData(data, conn));
             conn.on('close', () => {
                 console.log(`Connection closed with ${conn.peer}`);
-                delete connections[conn.peer];
-                broadcast({ type: 'peer-left', peerId: conn.peer });
-                updatePeerListUI();
+                 if (connectionMode === 'direct') {
+                    showNotification("Peer disconnected.", "info");
+                    leave();
+                } else if (connectionMode === 'room') {
+                    if (!isHost && conn.peer === roomCode) { // Host disconnected
+                        showNotification("Host has closed the room.", "warning");
+                        leave();
+                    } else { // A regular peer left
+                        delete connections[conn.peer];
+                        broadcast({ type: 'peer-left', peerId: conn.peer });
+                        updatePeerListUI();
+                    }
+                }
             });
             conn.on('error', (err) => { console.error(`Connection error with ${conn.peer}:`, err); });
         }
-
+        
+        function kickPeer(peerIdToKick) {
+            if (!isHost) return;
+            const conn = connections[peerIdToKick];
+            if (conn) {
+                conn.send({ type: 'kicked' });
+                setTimeout(() => conn.close(), 100); // Give time for message to send
+            }
+        }
+        
         // --- DATA ROUTER & BROADCASTING ---
         function handleData(data, conn) {
             console.log(`Received data from ${conn.peer}:`, data);
+            if (!data || typeof data !== 'object') return receiveChunk(data, conn);
 
-            if (data && typeof data === 'object') {
-                 switch(data.type) {
-                    // Room management
-                    case 'room-members': // You're a new client, connect to these peers
-                        data.members.forEach(peerId => {
-                           const newConn = peer.connect(peerId, { metadata: { deviceName: myDeviceName }, reliable: true });
-                           handleConnection(newConn);
-                        });
-                        showTransferWindow();
-                        break;
-                    case 'new-peer': // An existing client, connect to the new peer
-                        const newConn = peer.connect(data.peerId, { metadata: { deviceName: myDeviceName }, reliable: true });
-                        handleConnection(newConn);
-                        break;
-                     case 'peer-left': // A peer disconnected
-                        if(connections[data.peerId]) {
-                            connections[data.peerId].close();
-                            delete connections[data.peerId];
-                            updatePeerListUI();
-                        }
-                        break;
-                    // Features
-                    case 'file-request': handleFileRequest(data, conn); break;
-                    case 'file-accepted': handleFileAccepted(data, conn); break;
-                    case 'file-rejected': handleFileRejected(data, conn); break;
-                    case 'file-cancel': handleTransferCancellation(data, conn); break;
-                    case 'chat-message': displayChatMessage(data); break;
-                }
-            } else if (data instanceof ArrayBuffer || data instanceof Blob || data instanceof Uint8Array) {
-                receiveChunk(data, conn);
+             switch(data.type) {
+                case 'kicked': showNotification("You were kicked from the room.", "warning"); leave(); break;
+                case 'room-members': data.members.forEach(id => handleConnection(peer.connect(id, {metadata:{deviceName:myDeviceName}}))); showTransferWindow(); break;
+                case 'new-peer': handleConnection(peer.connect(data.peerId, {metadata:{deviceName:myDeviceName}})); break;
+                case 'peer-left': if(connections[data.peerId]) connections[data.peerId].close(); delete connections[data.peerId]; updatePeerListUI(); break;
+                case 'file-request': handleFileRequest(data, conn); break;
+                case 'file-accepted': handleFileAccepted(data, conn); break;
+                case 'file-rejected': console.log(`File rejected by ${conn.peer}`); break;
+                case 'chat-message': displayChatMessage(data); break;
             }
         }
 
         function broadcast(data, excludePeerId = null) {
-            for (const peerId in connections) {
-                if (peerId !== excludePeerId) {
-                    connections[peerId].send(data);
-                }
-            }
+            Object.keys(connections).forEach(id => {
+                if (id !== excludePeerId) connections[id].send(data);
+            });
         }
         
-        // --- FILE TRANSFER LOGIC (largely unchanged, but uses broadcast) ---
+        // --- FILE TRANSFER ---
         function queueFilesForTransfer(files) {
-            if (!files || files.length === 0 || Object.keys(connections).length === 0) {
-                 if(Object.keys(connections).length === 0) showNotification("No one else is in the room to send files to!", "warning");
-                 return;
-            }
+            if (!files || files.length === 0) return;
+            if (Object.keys(connections).length === 0) return showNotification("No one is connected!", "warning");
+
             for (const file of files) {
                 const transferId = `transfer_${Date.now()}_${Math.random()}`;
-                fileSendQueue.push({ id: transferId, file: file, status: 'queued', senderId: myPeerId, senderName: myDeviceName });
+                fileSendQueue.push({ id: transferId, file, senderId: myPeerId, senderName: myDeviceName });
             }
             updateFileQueueUI();
             if (!currentSendTransfer) processSendQueue();
@@ -404,45 +399,25 @@
             if (currentSendTransfer || fileSendQueue.length === 0) return;
             currentSendTransfer = fileSendQueue[0];
             updateFileQueueUI();
-            broadcast({
-                type: 'file-request',
-                transferId: currentSendTransfer.id,
-                name: currentSendTransfer.file.name,
-                size: currentSendTransfer.file.size,
-                fileType: currentSendTransfer.file.type,
-                senderId: myPeerId,
-                senderName: myDeviceName
-            });
+            const payload = { type: 'file-request', id: currentSendTransfer.id, name: currentSendTransfer.file.name, size: currentSendTransfer.file.size, fileType: currentSendTransfer.file.type, senderId: myPeerId, senderName: myDeviceName };
+            broadcast(payload);
         }
         
         function handleFileAccepted(data, conn) {
-            if (!currentSendTransfer || currentSendTransfer.id !== data.transferId) return;
-            console.log(`File accepted by ${conn.peer}`, data);
-            currentSendTransfer.status = 'sending';
-            isTransferCancelled = false;
-            // Send the file only to the peer who accepted
+            if (!currentSendTransfer || currentSendTransfer.id !== data.id) return;
             sendFile(currentSendTransfer, conn);
-        }
-        
-        function handleFileRejected(data, conn) {
-            // Since it's a broadcast, we don't do anything on rejection
-            console.log(`File rejected by ${conn.peer}`);
         }
 
         function sendFile(transfer, connection) {
-            // This function now sends a file to a SINGLE connection.
             const { file, id } = transfer;
             let chunkIndex = 0;
+            const CHUNK_SIZE = 262144;
             const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
             let startTime = Date.now();
             let bytesSent = 0;
 
             const sendNextChunk = () => {
-                if (isTransferCancelled) {
-                    isTransferCancelled = false; return;
-                }
                 if (chunkIndex >= totalChunks) {
-                    // Remove from queue and process next
                     fileSendQueue.shift(); 
                     currentSendTransfer = null;
                     updateFileQueueUI();
@@ -452,44 +427,33 @@
                 const start = chunkIndex * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, file.size);
                 
-                const reader = new FileReader();
-                reader.onload = (e) => {
+                file.slice(start, end).arrayBuffer().then(chunk => {
                     try {
-                        connection.send(e.target.result);
-                        bytesSent += (end - start);
+                        connection.send(chunk);
+                        bytesSent += chunk.byteLength;
                         const progress = (bytesSent / file.size) * 100;
                         const elapsed = (Date.now() - startTime) / 1000;
                         const speed = elapsed > 0 ? (bytesSent / 1024 / 1024) / elapsed : 0;
-                        updateTransferProgressUI(id, { progress, speed, status: `Sending to ${connection.metadata.deviceName}` });
+                        const status = connectionMode === 'direct' ? 'Sending...' : `Sending to ${connection.metadata.deviceName}`;
+                        updateTransferProgressUI(id, { progress, speed, status });
                         chunkIndex++;
                         setTimeout(sendNextChunk, 0);
-                    } catch (err) {
-                        console.error('Error sending chunk:', err);
-                    }
-                };
-                reader.readAsArrayBuffer(file.slice(start, end));
+                    } catch (err) { console.error('Error sending chunk:', err); }
+                });
             };
             sendNextChunk();
         }
 
-        // --- RECEIVER SIDE LOGIC ---
         function handleFileRequest(metadata, conn) {
-            // Prevent accepting your own file requests
             if (metadata.senderId === myPeerId) return;
-
-            receiveFileTransfer = {
-                metadata: metadata,
-                conn: conn, // The connection to the sender
-                chunks: [], receivedSize: 0, startTime: null, accepted: false
-            };
+            receiveFileTransfer = { metadata, conn, chunks: [], receivedSize: 0, accepted: false };
+            document.getElementById('fileReceiveSubtext').textContent = connectionMode === 'direct' ? 'A peer wants to send you a file:' : 'A peer in the room wants to send a file:';
             document.getElementById('fileReceiveName').textContent = metadata.name;
             document.getElementById('fileReceiveSize').textContent = formatBytes(metadata.size);
             document.getElementById('fileReceiveFrom').textContent = 'From: ' + metadata.senderName;
-            
             const ext = metadata.name.split('.').pop().toLowerCase();
             const iconMap = { 'jpg': 'fa-file-image', 'png': 'fa-file-image', 'pdf': 'fa-file-pdf', 'zip': 'fa-file-zipper', 'mp4': 'fa-file-video', 'mp3': 'fa-file-audio' };
             document.getElementById('fileReceiveIcon').className = `fas ${iconMap[ext] || 'fa-file'} text-3xl text-blue-600`;
-            
             document.getElementById('fileReceiveModal').classList.add('show');
             playSound('request');
         }
@@ -499,44 +463,27 @@
             if (receiveFileTransfer) {
                 receiveFileTransfer.accepted = true;
                 receiveFileTransfer.startTime = Date.now();
-                // Tell the original sender you've accepted
-                receiveFileTransfer.conn.send({
-                    type: 'file-accepted',
-                    transferId: receiveFileTransfer.metadata.transferId
-                });
-                addTransferToQueueUI(receiveFileTransfer.metadata.transferId, receiveFileTransfer.metadata.name);
+                receiveFileTransfer.conn.send({ type: 'file-accepted', id: receiveFileTransfer.metadata.id });
+                addTransferToQueueUI(receiveFileTransfer.metadata.id, receiveFileTransfer.metadata.name);
             }
         }
 
         function declineFile() {
             document.getElementById('fileReceiveModal').classList.remove('show');
-            if (receiveFileTransfer) {
-                // Tell the sender you rejected it
-                receiveFileTransfer.conn.send({
-                    type: 'file-rejected',
-                    transferId: receiveFileTransfer.metadata.transferId
-                });
-                receiveFileTransfer = null;
-            }
+            if (receiveFileTransfer) receiveFileTransfer.conn.send({ type: 'file-rejected', id: receiveFileTransfer.metadata.id });
+            receiveFileTransfer = null;
         }
         
         function receiveChunk(data, conn) {
-             if (!receiveFileTransfer || !receiveFileTransfer.accepted || conn.peer !== receiveFileTransfer.metadata.senderId) return;
-
-            const process = (arrayBuffer) => {
-                receiveFileTransfer.chunks.push(arrayBuffer);
-                receiveFileTransfer.receivedSize += arrayBuffer.byteLength;
-                const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
-                const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
-                const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
-                updateTransferProgressUI(receiveFileTransfer.metadata.transferId, { progress, speed, status: 'Receiving' });
-                if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) {
-                    completeFileReceive();
-                }
-            };
-            if (data instanceof Blob) data.arrayBuffer().then(process);
-            else if (data instanceof Uint8Array) process(data.buffer);
-            else process(data);
+            if (!receiveFileTransfer || !receiveFileTransfer.accepted || conn.peer !== receiveFileTransfer.metadata.senderId) return;
+            const arrayBuffer = data.buffer instanceof ArrayBuffer ? data.buffer : data;
+            receiveFileTransfer.chunks.push(arrayBuffer);
+            receiveFileTransfer.receivedSize += arrayBuffer.byteLength;
+            const progress = (receiveFileTransfer.receivedSize / receiveFileTransfer.metadata.size) * 100;
+            const elapsed = (Date.now() - receiveFileTransfer.startTime) / 1000;
+            const speed = elapsed > 0 ? (receiveFileTransfer.receivedSize / 1024 / 1024) / elapsed : 0;
+            updateTransferProgressUI(receiveFileTransfer.metadata.id, { progress, speed, status: 'Receiving' });
+            if (receiveFileTransfer.receivedSize >= receiveFileTransfer.metadata.size) completeFileReceive();
         }
 
         function completeFileReceive() {
@@ -549,13 +496,10 @@
                 a.download = metadata.name;
                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
                 URL.revokeObjectURL(a.href);
-                updateTransferProgressUI(metadata.transferId, { status: 'Completed!' });
+                updateTransferProgressUI(metadata.id, { status: 'Completed!' });
                 playSound('complete');
                 receiveFileTransfer = null;
-            } catch (e) {
-                console.error('Error completing file receive:', e);
-                playSound('error');
-            }
+            } catch (e) { console.error('Error completing file receive:', e); playSound('error'); }
         }
         
         // --- CHAT ---
@@ -565,44 +509,72 @@
             if (message) {
                 const payload = { type: 'chat-message', content: message, senderName: myDeviceName };
                 broadcast(payload);
-                displayChatMessage(payload, true); // Display own message immediately
+                displayChatMessage(payload, true);
                 input.value = '';
             }
         }
 
         function displayChatMessage(data, isSent = false) {
-            if(isSent && data.senderName !== myDeviceName) return; // Don't display own message twice
-            if(!isSent && data.senderName === myDeviceName) return;
-
+            if (isSent && data.senderName !== myDeviceName || !isSent && data.senderName === myDeviceName) return;
             const messagesDiv = document.getElementById('chatMessages');
-            const bubbleWrapper = document.createElement('div');
-            bubbleWrapper.className = `flex flex-col ${isSent ? 'items-end' : 'items-start'}`;
-
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'text-xs text-slate-500 mb-1';
-            nameSpan.textContent = isSent ? 'You' : data.senderName;
-            
+            const wrapper = document.createElement('div');
+            wrapper.className = `flex flex-col ${isSent ? 'items-end' : 'items-start'}`;
+            if (connectionMode === 'room') {
+                const name = document.createElement('span');
+                name.className = 'text-xs text-slate-500 mb-1';
+                name.textContent = isSent ? 'You' : data.senderName;
+                wrapper.appendChild(name);
+            }
             const bubble = document.createElement('div');
-            bubble.className = `p-2 rounded-lg max-w-xs lg:max-w-md break-words ${isSent ? 'chat-bubble-sent' : 'chat-bubble-received'}`;
+            bubble.className = `p-2 rounded-lg max-w-xs break-words ${isSent ? 'chat-bubble-sent' : 'chat-bubble-received'}`;
             bubble.textContent = data.content;
-
-            bubbleWrapper.appendChild(nameSpan);
-            bubbleWrapper.appendChild(bubble);
-            messagesDiv.appendChild(bubbleWrapper);
+            wrapper.appendChild(bubble);
+            messagesDiv.appendChild(wrapper);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             if(!isSent) playSound('chat');
         }
 
-        document.getElementById('chatInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendChatMessage();
-        });
-
-        // --- UI & UTILITY FUNCTIONS ---
-        const CHUNK_SIZE = 262144;
+        // --- QR CODE ---
+        function showMyIdQr() {
+            document.getElementById('qrModalTitle').textContent = 'Your Direct ID';
+            const container = document.getElementById('qrcodeContainer');
+            container.innerHTML = '';
+            new QRCode(container, { text: myPeerId, width: 256, height: 256 });
+            document.getElementById('qrCodeText').textContent = myPeerId;
+            document.getElementById('qrModal').classList.add('show');
+        }
         
+        function closeQR() { document.getElementById('qrModal').classList.remove('show'); }
+
+        function openQRScanner(mode) {
+            qrScannerMode = mode;
+            document.getElementById('qrScannerTitle').textContent = `Scan ${mode === 'direct' ? 'Peer' : 'Room'} QR Code`;
+            document.getElementById('qrScannerModal').classList.add('show');
+            html5QrCode = new Html5Qrcode("qr-reader");
+            html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, (decodedText) => {
+                if (qrScannerMode === 'direct') {
+                    document.getElementById('remotePeerIdInput').value = decodedText;
+                    closeQRScanner();
+                    connectToPeer();
+                } else {
+                    document.getElementById('roomCodeInput').value = decodedText;
+                    closeQRScanner();
+                    joinRoom();
+                }
+            }).catch(err => { console.error("QR Scanner error:", err); showNotification("Camera error.", 'error'); closeQRScanner(); });
+        }
+
+        function closeQRScanner() {
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().catch(err => console.error("Error stopping scanner:", err));
+            }
+            html5QrCode = null;
+            document.getElementById('qrScannerModal').classList.remove('show');
+        }
+        
+        // --- UI & UTILITY ---
         function loadDeviceName() {
-            const savedName = localStorage.getItem('deviceName');
-            myDeviceName = savedName || 'Device-' + Math.random().toString(36).substr(2, 4);
+            myDeviceName = localStorage.getItem('deviceName') || 'Device-' + Math.random().toString(36).substr(2, 4);
             document.getElementById('deviceNameInput').value = myDeviceName;
         }
 
@@ -618,29 +590,63 @@
         function showTransferWindow() {
             document.getElementById('homeScreen').classList.add('hidden');
             document.getElementById('transferWindow').classList.remove('hidden');
-            document.getElementById('roomCodeDisplay').textContent = roomCode;
-            document.getElementById('connectedDeviceName').textContent = `Your Name: ${myDeviceName}`;
-            document.getElementById('connectedDeviceId').textContent = `Your ID: ${myPeerId}`;
+            const header = document.getElementById('transferHeader');
+            const peerListContainer = document.getElementById('peerListContainer');
+            
+            if (connectionMode === 'direct') {
+                const remotePeer = Object.values(connections)[0];
+                header.innerHTML = `
+                    <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-white text-purple-600 w-16 h-16 rounded-full flex items-center justify-center"><i class="fas fa-user text-3xl"></i></div>
+                            <div>
+                                <h2 class="text-xl md:text-2xl font-bold">Connected to ${remotePeer.metadata.deviceName}</h2>
+                                <p class="text-xs opacity-75 font-mono">${remotePeer.peer}</p>
+                            </div>
+                        </div>
+                        <button onclick="leave()" class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600"><i class="fas fa-times mr-2"></i>Disconnect</button>
+                    </div>`;
+                peerListContainer.classList.add('hidden');
+                document.getElementById('sendFileTitle').innerHTML = '<i class="fas fa-paper-plane text-purple-600 mr-2"></i>Send Files';
+                document.getElementById('chatTitle').innerHTML = '<i class="fas fa-comments text-green-600 mr-2"></i>Direct Chat';
+            } else if (connectionMode === 'room') {
+                 header.innerHTML = `
+                    <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                        <div class="flex items-center gap-4">
+                             <div class="bg-white text-blue-600 w-16 h-16 rounded-full flex items-center justify-center"><i class="fas fa-users text-3xl"></i></div>
+                            <div>
+                                <h2 class="text-xl md:text-2xl font-bold">Room Code: <span class="font-mono">${roomCode}</span></h2>
+                                <p class="text-sm opacity-90">Your Name: ${myDeviceName}</p>
+                            </div>
+                        </div>
+                         <div class="flex gap-2">
+                            <button onclick="copyRoomCode()" class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600"><i class="fas fa-copy mr-2"></i>Copy Code</button>
+                            <button onclick="showMyIdQr('room')" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600"><i class="fas fa-qrcode mr-2"></i>Show QR</button>
+                            <button onclick="leave()" class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600"><i class="fas fa-door-open mr-2"></i>Leave Room</button>
+                        </div>
+                    </div>`;
+                peerListContainer.classList.remove('hidden');
+                document.getElementById('sendFileTitle').innerHTML = '<i class="fas fa-paper-plane text-blue-600 mr-2"></i>Send Files to Room';
+                document.getElementById('chatTitle').innerHTML = '<i class="fas fa-comments text-green-600 mr-2"></i>Room Chat';
+            }
             setupFileInputs();
-            updatePeerListUI();
         }
 
         function updatePeerListUI() {
+            if (connectionMode !== 'room') return;
             const peerListDiv = document.getElementById('peerList');
-            const peerIds = Object.keys(connections);
-            
-            // Add self
             let html = `<div class="p-2 bg-blue-50 rounded-lg text-sm font-bold text-blue-700">${myDeviceName} (You)</div>`;
-
+            const peerIds = Object.keys(connections);
             if (peerIds.length === 0) {
                  peerListDiv.innerHTML = html + '<p class="text-xs text-slate-400 text-center py-2">You are alone in this room.</p>';
                  return;
             }
-
             peerIds.forEach(id => {
                 const conn = connections[id];
-                const name = conn.metadata.deviceName || 'Unknown Device';
-                html += `<div class="p-2 bg-slate-50 rounded-lg text-sm text-slate-700">${name}</div>`;
+                if (!conn) return;
+                const name = conn.metadata.deviceName || 'Unknown';
+                const kickButton = isHost ? `<button onclick="kickPeer('${id}')" class="text-red-500 hover:text-red-700 text-xs font-bold">Kick</button>` : '';
+                html += `<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-sm text-slate-700"><span>${name}</span> ${kickButton}</div>`;
             });
             peerListDiv.innerHTML = html;
         }
@@ -675,104 +681,50 @@
                 queueDiv.innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
             }
             fileSendQueue.forEach(item => {
-                if (!document.getElementById(`transfer-progress-${item.id}`)) {
-                    addTransferToQueueUI(item.id, item.file.name, true);
-                }
+                if (!document.getElementById(`transfer-progress-${item.id}`)) addTransferToQueueUI(item.id, item.file.name, true);
             });
         }
         
         function addTransferToQueueUI(id, fileName, isSender = false) {
              const queueDiv = document.getElementById('fileQueue');
              if(queueDiv.querySelector('p')) queueDiv.innerHTML = '';
-             const progressElement = document.createElement('div');
-             progressElement.id = `transfer-progress-${id}`;
-             progressElement.innerHTML = `
+             const el = document.createElement('div');
+             el.id = `transfer-progress-${id}`;
+             el.innerHTML = `
                 <div class="bg-slate-100 rounded-lg p-3">
                     <div class="flex items-center justify-between mb-2">
                         <span class="text-sm font-medium text-slate-700 truncate" title="${fileName}">${fileName}</span>
-                        <div class="flex items-center gap-2">
-                             <span id="transferPercent-${id}" class="text-sm font-medium text-blue-600">0%</span>
-                        </div>
+                        <span id="transferPercent-${id}" class="text-sm font-medium text-blue-600">0%</span>
                     </div>
-                    <div class="w-full bg-slate-200 rounded-full h-2">
-                        <div id="transferProgressBar-${id}" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
-                    </div>
+                    <div class="w-full bg-slate-200 rounded-full h-2"><div id="transferProgressBar-${id}" class="bg-blue-600 h-2 rounded-full" style="width: 0%"></div></div>
                     <div class="flex justify-between text-xs text-slate-500 mt-1">
                         <span id="transferSpeed-${id}">0 MB/s</span>
-                        <span id="transferStatus-${id}">${isSender ? 'Offering to room...' : 'Waiting...'}</span>
+                        <span id="transferStatus-${id}">${isSender ? 'Offering...' : 'Waiting...'}</span>
                     </div>
                 </div>`;
-            queueDiv.appendChild(progressElement);
+            queueDiv.appendChild(el);
         }
 
         function updateTransferProgressUI(id, {progress, speed, status}) {
             const percentEl = document.getElementById(`transferPercent-${id}`);
-            const barEl = document.getElementById(`transferProgressBar-${id}`);
-            const speedEl = document.getElementById(`transferSpeed-${id}`);
-            const statusEl = document.getElementById(`transferStatus-${id}`);
-            if (percentEl && barEl && typeof progress !== 'undefined') {
+            if(!percentEl) return; // Element might have been removed
+            if (typeof progress !== 'undefined') {
                 percentEl.textContent = Math.round(progress) + '%';
-                barEl.style.width = progress + '%';
+                document.getElementById(`transferProgressBar-${id}`).style.width = progress + '%';
             }
-            if (speedEl && typeof speed !== 'undefined') speedEl.textContent = speed.toFixed(2) + ' MB/s';
-            if (statusEl && typeof status !== 'undefined') statusEl.textContent = status;
+            if (typeof speed !== 'undefined') document.getElementById(`transferSpeed-${id}`).textContent = speed.toFixed(2) + ' MB/s';
+            if (typeof status !== 'undefined') document.getElementById(`transferStatus-${id}`).textContent = status;
             if (status === 'Completed!') {
                 setTimeout(() => document.getElementById(`transfer-progress-${id}`)?.remove(), 3000);
             }
         }
 
+        function copyMyId() { navigator.clipboard.writeText(myPeerId).then(() => showNotification('Direct ID copied!', 'success')); }
         function copyRoomCode() { navigator.clipboard.writeText(roomCode).then(() => showNotification('Room code copied!', 'success')); }
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024, sizes = ['Bytes', 'KB', 'MB', 'GB'], i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-        function showNotification(message, type) {
-            const colors = { success: 'bg-green-100 text-green-700 border-green-500', error: 'bg-red-100 text-red-700 border-red-500', warning: 'bg-yellow-100 text-yellow-700 border-yellow-500', info: 'bg-blue-100 text-blue-700 border-blue-500' };
-            const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-info-circle', info: 'fa-info-circle' };
-            const notification = document.createElement('div');
-            notification.className = `fixed top-4 right-4 ${colors[type]} border-l-4 p-4 rounded-lg shadow-lg z-50 max-w-sm`;
-            notification.innerHTML = `<div class="flex items-center"><i class="fas ${icons[type]} text-xl mr-3"></i><p class="text-sm font-medium">${message}</p></div>`;
-            document.body.appendChild(notification);
-            setTimeout(() => { notification.remove(); }, 3000);
-        }
-
-        function playSound(type) {
-            if (!audioContext) return;
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            oscillator.connect(gainNode); gainNode.connect(audioContext.destination);
-            const sounds = { connect: { freq: 440, duration: 0.1, type: 'sine' }, disconnect: { freq: 220, duration: 0.1, type: 'sawtooth' }, request: { freq: 660, duration: 0.2, type: 'triangle' }, complete: { freq: 880, duration: 0.3, type: 'sine' }, error: { freq: 110, duration: 0.5, type: 'square' }, chat: { freq: 550, duration: 0.05, type: 'sine' } };
-            const sound = sounds[type];
-            if (!sound) return;
-            oscillator.type = sound.type;
-            oscillator.frequency.setValueAtTime(sound.freq, audioContext.currentTime);
-            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + sound.duration);
-            oscillator.start(audioContext.currentTime);
-            oscillator.stop(audioContext.currentTime + sound.duration);
-        }
-        
-        // --- Transfer Cancellation (Simplified for group context) ---
-        function cancelTransfer(transferId) {
-            // Only the sender can cancel an offer to the room
-            if (currentSendTransfer && currentSendTransfer.id === transferId) {
-                broadcast({ type: 'file-cancel', transferId });
-                fileSendQueue.shift();
-                currentSendTransfer = null;
-                updateFileQueueUI();
-                processSendQueue();
-                showNotification('File offer cancelled', 'info');
-            }
-        }
-        function handleTransferCancellation(data, conn) {
-            // A receiver gets notified that an offer was cancelled
-            showNotification(`Offer for ${data.fileName} was cancelled by sender`, 'warning');
-            if (receiveFileTransfer && receiveFileTransfer.metadata.transferId === data.transferId) {
-                document.getElementById('fileReceiveModal').classList.remove('show');
-                receiveFileTransfer = null;
-            }
-        }
+        function formatBytes(b) { if (b === 0) return '0 Bytes'; const k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k)); return `${parseFloat((b/Math.pow(k,i)).toFixed(2))} ${s[i]}`; }
+        function showNotification(m,t){const c={s:'bg-green-100 text-green-700 border-green-500',e:'bg-red-100 text-red-700 border-red-500',w:'bg-yellow-100 text-yellow-700 border-yellow-500',i:'bg-blue-100 text-blue-700 border-blue-500'},i={s:'check',e:'exclamation',w:'info',i:'info'},n=document.createElement('div');n.className=`fixed top-4 right-4 ${c[t[0]]} border-l-4 p-4 rounded-lg shadow-lg z-50`;n.innerHTML=`<div class="flex items-center"><i class="fas fa-${i[t[0]]}-circle text-xl mr-3"></i><p>${m}</p></div>`;document.body.appendChild(n);setTimeout(()=>n.remove(),3e3)}
+        function playSound(t){if(!audioContext)return;const o=audioContext.createOscillator(),g=audioContext.createGain();o.connect(g);g.connect(audioContext.destination);const s={c:{f:440,d:0.1,t:'sine'},d:{f:220,d:0.1,t:'sawtooth'},r:{f:660,d:0.2,t:'triangle'},f:{f:880,d:0.3,t:'sine'},e:{f:110,d:0.5,t:'square'},m:{f:550,d:0.05,t:'sine'}},d=s[t[0]];if(!d)return;o.type=d.t;o.frequency.setValueAtTime(d.f,audioContext.currentTime);g.gain.setValueAtTime(0.3,audioContext.currentTime);g.gain.exponentialRampToValueAtTime(1e-4,audioContext.currentTime+d.d);o.start();o.stop(audioContext.currentTime+d.d)}
+        document.getElementById('chatInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') sendChatMessage(); });
         
         window.addEventListener('load', initialize);
     </script>
