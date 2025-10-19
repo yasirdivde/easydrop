@@ -392,7 +392,7 @@
             if (!files || files.length === 0 || Object.keys(connections).length === 0) return showNotification("No one is connected!", "warning");
 
             for (const file of files) {
-                const transferId = `transfer_${Date.now()}_${Math.random()}`;
+                const transferId = `transfer_${Date.now()}_${Math.random().toString(36).substring(2)}`;
                 fileSendQueue.push({ id: transferId, file, senderId: myPeerId, senderName: myDeviceName });
             }
             if (!currentSendTransfer) processSendQueue();
@@ -742,21 +742,6 @@
             const status = document.getElementById('connectionStatus');
             const colors = { 'green': 'text-green-600', 'red': 'text-red-600', 'orange': 'text-orange-600', 'gray': 'text-slate-500' };
             status.innerHTML = `<i class="fas fa-circle ${colors[color] || 'text-gray-400'} ${color === 'green' ? 'online' : ''} mr-1"></i>${text}`;
-        }
-        
-        function updateFileQueueUI(isNewTransfer = false) {
-            const queueDiv = document.getElementById('fileQueue');
-            
-            if (isNewTransfer && currentSendTransfer) {
-                if (!document.getElementById(`transfer-progress-${currentSendTransfer.id}`)) {
-                    addTransferToQueueUI(currentSendTransfer.id, currentSendTransfer.file.name, true);
-                }
-            } else {
-                 const activeTransfers = document.querySelectorAll('[id^="transfer-progress-"]');
-                 if (fileSendQueue.length === 0 && activeTransfers.length === 0) {
-                    queueDiv.innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
-                }
-            }
         }
         
         function addTransferToQueueUI(id, fileName, isSender = false) {
