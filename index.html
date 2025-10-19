@@ -255,13 +255,9 @@
                 document.getElementById('myPeerId').textContent = id;
                 updateConnectionStatus('Online', 'green');
                 
-                if (connectionMode === 'room') {
-                    if (isHost) {
-                        showTransferWindow();
-                    } else {
-                        const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
-                        handleConnection(hostConnection);
-                    }
+                if (connectionMode === 'room' && !isHost) {
+                    const hostConnection = peer.connect(roomCode, { metadata: { deviceName: myDeviceName }, reliable: true });
+                    handleConnection(hostConnection);
                 }
             });
 
@@ -310,28 +306,11 @@
         }
         
         function leave() {
-            Object.values(connections).forEach(conn => conn.close());
-            if (isHost && peer) peer.destroy();
-            resetToHome();
+            window.location.reload();
         }
         
         function resetToHome() {
-            if (peer && !peer.destroyed && !isHost) peer.destroy();
-            
-            connections = {};
-            isHost = false;
-            roomCode = null;
-            connectionMode = null;
-            fileSendQueue = [];
-            currentSendTransfer = null;
-            pendingFileTransfers.clear();
-            
-            document.getElementById('fileQueue').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>';
-            document.getElementById('sessionHistory').innerHTML = '<p class="text-sm text-slate-400 text-center py-4">No events yet</p>';
-            document.getElementById('homeScreen').classList.remove('hidden');
-            document.getElementById('transferWindow').classList.add('hidden');
-            
-            setupPeer();
+            window.location.reload();
         }
 
         function handleConnection(conn) {
@@ -637,7 +616,7 @@
             html5QrCode = new Html5Qrcode("qr-reader");
             html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: {width: 250, height: 250} }, 
                 (decodedText) => {
-                    // Do not close scanner here, let showTransferWindow handle it
+                    closeQRScanner(); 
                     if (qrScannerMode === 'direct') {
                         document.getElementById('remotePeerIdInput').value = decodedText;
                         connectToPeer();
