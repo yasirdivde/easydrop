@@ -329,16 +329,33 @@
   let qrScannerMode = null; // "direct" | "room"
   let qrScanLocked = false;
 
-  // Peer config (client-side only; default PeerServer Cloud)
-  const peerConfig = {
-    debug: 2,
-    config: {
-      iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:global.stun.twilio.com:3478" }
-      ]
-    }
-  };
+  // ---------- Multi-endpoint PeerJS Cloud fallback ----------
+  const PEER_CLOUD_ENDPOINTS = [
+    { host: '0.peerjs.com', port: 443, path: '/peerjs', secure: true, key: 'peerjs' },
+    { host: '1.peerjs.com', port: 443, path: '/peerjs', secure: true, key: 'peerjs' },
+    { host: '2.peerjs.com', port: 443, path: '/peerjs', secure: true, key: 'peerjs' },
+    { host: '3.peerjs.com', port: 443, path: '/peerjs', secure: true, key: 'peerjs' }
+  ];
+
+  const ICE_SERVERS = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:global.stun.twilio.com:3478" }
+  ];
+
+  let endpointIndex = 0;
+  let initAttempt = 0;
+
+  function buildPeerOptions(ep) {
+    return {
+      host: ep.host,
+      port: ep.port,
+      path: ep.path,
+      secure: ep.secure,
+      key: ep.key,
+      debug: 2,
+      config: { iceServers: ICE_SERVERS }
+    };
+  }
 
   // ---------- Init ----------
   window.addEventListener("load", initialize);
@@ -346,12 +363,10 @@
   function initialize() {
     loadDeviceName();
     bindUI();
-
-    // Immediate ID pre-render and connect with retries
     preferredPeerId = genId();
     $("myPeerId").textContent = preferredPeerId;
     updateStatus("Connecting...", "orange");
-    initPeerWithRetry(preferredPeerId);
+    initPeerWithFallback(preferredPeerId);
   }
 
   function genId() {
@@ -420,40 +435,28 @@
       e.target.value = "";
     });
 
-    window.addEventListener("online", () => { if (!isPeerReady) initPeerWithRetry(genId()); });
+    window.addEventListener("online", () => { if (!isPeerReady) initPeerWithFallback(genId()); });
   }
 
-  // ---------- Robust Peer init with retry watchdog ----------
-  let initAttempt = 0;
-  function initPeerWithRetry(idOrNull) {
-    initAttempt++;
-    setupPeer(idOrNull);
+  // Robust Peer init with endpoint rotation and watchdog
+  function initPeerWithFallback(customIdOrNull) {
+    const attemptId = ++initAttempt;
+    const ep = PEER_CLOUD_ENDPOINTS[endpointIndex % PEER_CLOUD_ENDPOINTS.length];
+    const opts = buildPeerOptions(ep);
 
-    // Watchdog: if open not fired within 3000 ms, retry with a new ID, then fallback to no custom ID
-    const attemptId = initAttempt;
+    try { if (peer) peer.destroy(); } catch (_) {}
+    peer = customIdOrNull ? new Peer(customIdOrNull, opts) : new Peer(opts);
+
+    isPeerReady = false;
+    updateStatus("Connecting...", "orange");
+
+    // Watchdog: hop endpoint if no open in 2500ms
     setTimeout(() => {
       if (!isPeerReady && attemptId === initAttempt) {
-        try { peer && peer.destroy(); } catch (_) {}
-        if (idOrNull) {
-          // First fallback: new custom ID
-          preferredPeerId = genId();
-          $("myPeerId").textContent = preferredPeerId;
-          updateStatus("Retrying...", "orange");
-          initPeerWithRetry(preferredPeerId);
-        } else {
-          // Already tried random assignment; try again once more
-          updateStatus("Retrying...", "orange");
-          initPeerWithRetry(null);
-        }
+        endpointIndex++;
+        initPeerWithFallback(customIdOrNull);
       }
-    }, 3000);
-  }
-
-  function setupPeer(customId) {
-    try { if (peer) peer.destroy(); } catch (_) {}
-
-    // If customId is null, let server assign a fresh ID
-    peer = customId ? new Peer(customId, peerConfig) : new Peer(peerConfig);
+    }, 2500);
 
     peer.on("open", (id) => {
       myPeerId = id;
@@ -463,23 +466,22 @@
       updateStatus("Online", "green");
     });
 
-    peer.on("connection", (conn) => {
-      if (!connectionMode) {
-        connectionMode = (isHost || (roomCode && roomCode === myPeerId)) ? "room" : "direct";
-      }
-      handleConnection(conn);
-    });
-
     peer.on("error", (err) => {
       console.warn("Peer error:", err?.type || err);
-      // If ID is taken, regenerate and retry fast
-      if (String(err?.type || err).includes("unavailable-id")) {
+      const t = String(err?.type || "");
+      // ID conflict → regenerate on same endpoint
+      if (t.includes("unavailable-id")) {
         preferredPeerId = genId();
         $("myPeerId").textContent = preferredPeerId;
-        initPeerWithRetry(preferredPeerId);
+        initPeerWithFallback(preferredPeerId);
         return;
       }
-      // If server unreachable, next watchdog will retry with null ID
+      // Socket/server issues → rotate endpoint
+      if (t.includes("server-error") || t.includes("socket-error") || t.includes("socket-closed")) {
+        endpointIndex++;
+        initPeerWithFallback(customIdOrNull);
+        return;
+      }
       updateStatus("Connecting...", "orange");
     });
 
@@ -487,6 +489,13 @@
       isPeerReady = false;
       updateStatus("Reconnecting...", "orange");
       try { peer.reconnect(); } catch (_) {}
+    });
+
+    peer.on("connection", (conn) => {
+      if (!connectionMode) {
+        connectionMode = (isHost || (roomCode && roomCode === myPeerId)) ? "room" : "direct";
+      }
+      handleConnection(conn);
     });
   }
 
@@ -524,11 +533,11 @@
     connectionMode = "room";
     isHost = true;
     roomCode = Math.random().toString(36).toUpperCase().slice(2, 8);
-    // Re-init as host with roomCode so others can dial this ID immediately
+    // Re-init as host with roomCode so others can dial immediately
     isPeerReady = false;
     updateStatus("Connecting...", "orange");
     $("myPeerId").textContent = roomCode;
-    initPeerWithRetry(roomCode);
+    initPeerWithFallback(roomCode);
     showTransferWindow();
   }
 
