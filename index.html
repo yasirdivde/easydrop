@@ -18,223 +18,271 @@
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <style>
-    .modal { display: none; position: fixed; z-index: 1000; inset: 0; background: rgba(0,0,0,.5); }
-    .modal.show { display: flex; align-items: center; justify-content: center; }
+    /* --- Base Styles & Fonts --- */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    body {
+        font-family: 'Inter', sans-serif;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* --- App Layout --- */
+    .app-screen {
+        display: none; /* Hidden by default */
+        animation: fadeIn 0.5s ease-in-out;
+    }
+    .app-screen.active {
+        display: block;
+    }
+    /* On desktop, show both home cards */
+    @media (min-width: 1024px) {
+        #homeScreen.active {
+            display: grid;
+        }
+        #transferWindow.active {
+            display: block;
+        }
+    }
+
+    /* --- Animations --- */
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.03); }
+    }
+    .animate-pulse-slow {
+        animation: pulse 2.5s infinite ease-in-out;
+    }
+
+    /* --- Component Styles --- */
+    .app-card {
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .app-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    }
+    .btn {
+        transition: all 0.2s ease-in-out;
+    }
+    .btn:hover {
+        transform: scale(1.03);
+        filter: brightness(1.1);
+    }
+    .btn:active {
+        transform: scale(0.98);
+        filter: brightness(0.95);
+    }
+
+    /* --- Modals --- */
+    .modal { display: none; position: fixed; z-index: 50; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); }
+    .modal.show { display: flex; align-items: center; justify-content: center; animation: fadeIn 0.3s ease; }
+    .modal-content { animation: fadeIn 0.4s ease 0.1s both; }
+
+    /* --- Chat Bubbles --- */
     .chat-bubble-sent { background-color: #3b82f6; color: #fff; align-self: flex-end; }
     .chat-bubble-received { background-color: #e5e7eb; color: #1f2937; align-self: flex-start; }
+
+    /* --- File Queue --- */
     .queue-item:hover .cancel-btn { opacity: 1; }
     .cancel-btn { opacity: 0.6; transition: opacity .15s ease; }
+
+    /* --- Bottom Navigation (Mobile) --- */
+    .bottom-nav {
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+    }
+    .nav-btn {
+        transition: all 0.2s ease;
+    }
+    .nav-btn.active {
+        color: #3b82f6; /* text-blue-600 */
+        transform: translateY(-4px) scale(1.1);
+    }
   </style>
 </head>
-<body class="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+<body class="bg-slate-100 text-slate-800">
 
-  <!-- Home -->
-  <div id="homeScreen" class="container mx-auto px-4 py-6 max-w-6xl">
-    <div class="text-center mb-6">
-      <div class="flex items-center justify-center mb-3">
-        <i class="fas fa-paper-plane text-4xl text-blue-600"></i>
-      </div>
-      <h1 class="text-3xl font-bold text-slate-800 mb-1">EasyDrop P2P</h1>
-      <p class="text-sm text-slate-600">Direct peer-to-peer file sharing • No file size limits</p>
-    </div>
+  <!-- Main App Container -->
+  <div id="appContainer" class="pb-24 md:pb-0">
 
-    <div class="text-center mb-5">
-      <p class="text-xs text-slate-600 mb-2">Your Device Name</p>
-      <div class="flex items-center gap-2 justify-center flex-wrap">
-        <input id="deviceNameInput" type="text"
-               class="text-base font-bold text-blue-600 bg-slate-100 px-3 py-2 rounded border-2 border-transparent focus:border-blue-500 outline-none max-w-xs"
-               value="Device-XXXX"/>
-        <button id="saveNameBtn"
-                class="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700"
-                title="Save Name">
-          <i class="fas fa-save"></i>
-        </button>
-      </div>
-      <div class="mt-3">
-        <span id="connectionStatus" class="text-xs text-slate-500">
-          <i class="fas fa-circle text-gray-400 mr-1"></i> Waiting...
-        </span>
-      </div>
-    </div>
+    <!-- Home Screen -->
+    <div id="homeScreen" class="app-screen active container mx-auto px-4 py-6 max-w-6xl lg:grid lg:grid-cols-2 lg:gap-8">
+        <div class="lg:col-span-2 text-center mb-8">
+          <div class="flex items-center justify-center mb-3 gap-3">
+            <i class="fas fa-paper-plane text-4xl text-blue-600"></i>
+            <h1 class="text-4xl font-bold text-slate-800">EasyDrop</h1>
+          </div>
+          <p class="text-md text-slate-600">Simple, direct, and unlimited peer-to-peer file sharing.</p>
+        </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      <!-- Direct -->
-      <div class="bg-white rounded-2xl shadow-lg p-5">
-        <h3 class="text-lg font-bold text-slate-800 mb-4">
-          <i class="fas fa-user text-purple-600 mr-2"></i>Direct P2P Connection
+        <div class="lg:col-span-2 text-center mb-8">
+            <div class="inline-flex items-center gap-2 justify-center flex-wrap bg-white p-2 rounded-full shadow-md">
+                <span class="text-xs text-slate-500 pl-2">Device Name:</span>
+                <input id="deviceNameInput" type="text"
+                       class="text-base font-bold text-blue-600 bg-transparent focus:bg-slate-100 px-3 py-1 rounded-full outline-none max-w-[150px] md:max-w-xs transition"
+                       value="Device-XXXX"/>
+                <button id="saveNameBtn" class="btn bg-blue-500 text-white w-9 h-9 rounded-full hover:bg-blue-600" title="Save Name">
+                  <i class="fas fa-save"></i>
+                </button>
+            </div>
+            <div class="mt-4">
+              <span id="connectionStatus" class="text-sm text-slate-500 transition-colors">
+                <i class="fas fa-circle text-gray-400 mr-1"></i> Waiting for PeerJS...
+              </span>
+            </div>
+        </div>
+
+      <!-- Direct Connection Card -->
+      <div class="app-card bg-white rounded-2xl shadow-lg p-6 mb-6 lg:mb-0">
+        <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-3">
+          <i class="fas fa-user text-purple-600"></i>Direct Connection
         </h3>
-
         <div class="bg-slate-50 rounded-lg p-3 mb-4">
           <p class="text-xs text-slate-600 mb-1">Your Direct ID</p>
           <div class="flex items-center gap-2">
             <code id="myPeerId" class="flex-1 text-sm font-mono font-bold text-purple-700 bg-slate-200 px-3 py-2 rounded break-all">Initializing...</code>
-            <button id="copyMyIdBtn" class="text-purple-600 hover:text-purple-700" title="Copy ID"><i class="fas fa-copy"></i></button>
-            <button id="showMyIdQrBtn" class="text-purple-600 hover:text-purple-700" title="Show QR"><i class="fas fa-qrcode"></i></button>
+            <button id="copyMyIdBtn" class="btn text-purple-600 hover:text-purple-700 text-xl" title="Copy ID"><i class="fas fa-copy"></i></button>
+            <button id="showMyIdQrBtn" class="btn text-purple-600 hover:text-purple-700 text-xl" title="Show QR"><i class="fas fa-qrcode"></i></button>
           </div>
         </div>
-
-        <div class="flex flex-col gap-2">
-          <input id="remotePeerIdInput" type="text" placeholder="Enter Peer’s Direct ID..." class="flex-1 border border-slate-300 rounded-lg px-4 py-3"/>
-          <div class="flex gap-2">
-            <button id="scanDirectBtn" class="flex-1 bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700">
+        <div class="flex flex-col gap-3">
+          <input id="remotePeerIdInput" type="text" placeholder="Enter Peer’s Direct ID..." class="w-full border border-slate-300 rounded-lg px-4 py-3 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"/>
+          <div class="grid grid-cols-2 gap-3">
+            <button id="scanDirectBtn" class="btn w-full bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700">
               <i class="fas fa-camera mr-2"></i>Scan
             </button>
-            <button id="connectDirectBtn" class="flex-1 bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700">
+            <button id="connectDirectBtn" class="btn w-full bg-purple-600 text-white px-6 py-3 rounded-lg hover:bg-purple-700">
               <i class="fas fa-link mr-2"></i>Connect
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Room -->
-      <div class="bg-white rounded-2xl shadow-lg p-5">
-        <h3 class="text-lg font-bold text-slate-800 mb-4">
-          <i class="fas fa-users text-blue-600 mr-2"></i>Rooms (Group)
+      <!-- Room Connection Card -->
+      <div class="app-card bg-white rounded-2xl shadow-lg p-6">
+        <h3 class="text-xl font-bold text-slate-800 mb-4 flex items-center gap-3">
+          <i class="fas fa-users text-blue-600"></i>Rooms
         </h3>
-
-        <div class="flex flex-col gap-2">
-          <input id="roomCodeInput" type="text" placeholder="Enter Room Code..." class="flex-1 border border-slate-300 rounded-lg px-4 py-3"/>
-          <div class="flex gap-2">
-            <button id="scanRoomBtn" class="flex-1 bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700">
+        <div class="flex flex-col gap-3">
+          <input id="roomCodeInput" type="text" placeholder="Enter Room Code..." class="w-full border border-slate-300 rounded-lg px-4 py-3 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"/>
+          <div class="grid grid-cols-2 gap-3">
+            <button id="scanRoomBtn" class="btn w-full bg-teal-600 text-white px-4 py-3 rounded-lg hover:bg-teal-700">
               <i class="fas fa-camera mr-2"></i>Scan
             </button>
-            <button id="joinRoomBtn" class="flex-1 bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700">
+            <button id="joinRoomBtn" class="btn w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700">
               <i class="fas fa-sign-in-alt mr-2"></i>Join
             </button>
           </div>
         </div>
-
-        <div class="text-center my-3 text-slate-500 text-sm">OR</div>
-
-        <button id="createRoomBtn" class="w-full bg-blue-800 text-white px-6 py-3 rounded-lg hover:bg-blue-900">
+        <div class="text-center my-4 text-slate-400 text-sm font-semibold">OR</div>
+        <button id="createRoomBtn" class="btn w-full bg-gradient-to-r from-blue-700 to-blue-500 text-white px-6 py-3 rounded-lg hover:from-blue-800 hover:to-blue-600 animate-pulse-slow">
           <i class="fas fa-plus-circle mr-2"></i>Create New Room
         </button>
       </div>
     </div>
 
-    <div class="text-center mt-8 text-xs text-slate-500 px-4">
-      <p><i class="fas fa-shield-alt mr-1"></i>Peer-to-peer • End-to-end encrypted • No file size limits</p>
-      <p class="mt-2"><i class="fas fa-server mr-1"></i>Files never stored on server • Direct device transfer</p>
-      <p class="mt-2">Created with Coffee By YASIR DIVDE</p>
-    </div>
-  </div>
-
-  <!-- Transfer Window -->
-  <div id="transferWindow" class="hidden container mx-auto px-4 py-6 max-w-7xl">
-    <div id="transferHeader" class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-5 mb-6 text-white"></div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="lg:col-span-2 flex flex-col gap-6">
-        <!-- Send -->
-        <div class="bg-white rounded-2xl shadow-lg p-6">
-          <h3 id="sendFileTitle" class="text-xl font-bold text-slate-800 mb-4 text-center"></h3>
-          <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center cursor-pointer hover:border-blue-400 transition-all">
-            <i class="fas fa-cloud-upload-alt text-5xl text-slate-400 mb-4"></i>
-            <p class="text-lg text-slate-700 mb-1">Drag & Drop files here</p>
-            <p class="text-sm text-slate-500 mb-4">or</p>
-            <label for="fileInput" class="bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 inline-block">
-              <i class="fas fa-folder-open mr-2"></i>Browse Files
-            </label>
-            <input id="fileInput" type="file" class="hidden" multiple />
+    <!-- Transfer Screen -->
+    <div id="transferWindow" class="app-screen container mx-auto px-4 py-6 max-w-7xl">
+      <div id="transferHeader" class="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl shadow-lg p-5 mb-6 text-white"></div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-2 flex flex-col gap-6">
+          <!-- Send -->
+          <div class="app-card bg-white rounded-2xl shadow-lg p-6">
+            <h3 id="sendFileTitle" class="text-xl font-bold text-slate-800 mb-4 text-center"></h3>
+            <div id="dropZone" class="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
+              <i class="fas fa-cloud-upload-alt text-5xl text-slate-400 mb-4"></i>
+              <p class="text-lg text-slate-700 mb-1">Drag & Drop files here</p>
+              <p class="text-sm text-slate-500 mb-4">or</p>
+              <label for="fileInput" class="btn bg-blue-600 text-white px-6 py-3 rounded-lg cursor-pointer hover:bg-blue-700 inline-block">
+                <i class="fas fa-folder-open mr-2"></i>Browse Files
+              </label>
+              <input id="fileInput" type="file" class="hidden" multiple />
+            </div>
+          </div>
+          <!-- Queue -->
+          <div class="app-card bg-white rounded-2xl shadow-lg p-6">
+            <h3 class="text-lg font-bold text-slate-800 mb-4"><i class="fas fa-tasks text-blue-600 mr-2"></i>Transfer Queue</h3>
+            <div id="fileQueue"><p class="text-sm text-slate-400 text-center py-4">No active transfers</p></div>
           </div>
         </div>
-
-        <!-- Queue -->
-        <div class="bg-white rounded-2xl shadow-lg p-6">
-          <h3 class="text-lg font-bold text-slate-800 mb-4">
-            <i class="fas fa-tasks text-blue-600 mr-2"></i>Transfer Queue
-          </h3>
-          <div id="fileQueue" class="">
-            <p class="text-sm text-slate-400 text-center py-4">No active transfers</p>
+        <!-- Right Column -->
+        <div class="flex flex-col gap-6">
+          <div id="peerListContainer" class="app-card bg-white rounded-2xl shadow-lg p-6 hidden">
+            <h3 class="text-lg font-bold text-slate-800 mb-4"><i class="fas fa-user-friends text-purple-600 mr-2"></i>Connected Peers</h3>
+            <div id="peerList" class="space-y-2 max-h-40 overflow-y-auto"></div>
           </div>
-        </div>
-      </div>
-
-      <!-- Right Column -->
-      <div class="flex flex-col gap-6">
-        <!-- Peers (room only) -->
-        <div id="peerListContainer" class="bg-white rounded-2xl shadow-lg p-6 hidden">
-          <h3 class="text-lg font-bold text-slate-800 mb-4">
-            <i class="fas fa-user-friends text-purple-600 mr-2"></i>Connected Peers
-          </h3>
-          <div id="peerList" class="space-y-2 max-h-40 overflow-y-auto"></div>
-        </div>
-
-        <!-- Chat -->
-        <div class="bg-white rounded-2xl shadow-lg p-6 flex flex-col" style="height: 50vh; min-height: 300px;">
-          <h3 id="chatTitle" class="text-lg font-bold text-slate-800 mb-4"></h3>
-          <div id="chatMessages" class="flex-1 overflow-y-auto bg-slate-50 rounded-lg p-3 flex flex-col gap-2 mb-4"></div>
-          <div class="flex gap-2">
-            <input id="chatInput" type="text" class="flex-1 border border-slate-300 rounded-lg px-4 py-2" placeholder="Type a message..."/>
-            <button id="sendChatBtn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
-              <i class="fas fa-paper-plane"></i>
-            </button>
+          <div class="app-card bg-white rounded-2xl shadow-lg p-6 flex flex-col" style="height: 50vh; min-height: 350px;">
+            <h3 id="chatTitle" class="text-lg font-bold text-slate-800 mb-4"></h3>
+            <div id="chatMessages" class="flex-1 overflow-y-auto bg-slate-50 rounded-lg p-3 flex flex-col gap-2 mb-4"></div>
+            <div class="flex gap-2">
+              <input id="chatInput" type="text" class="flex-1 border border-slate-300 rounded-lg px-4 py-2 transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200" placeholder="Type a message..."/>
+              <button id="sendChatBtn" class="btn bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"><i class="fas fa-paper-plane"></i></button>
+            </div>
           </div>
-        </div>
-
-        <!-- History -->
-        <div class="bg-white rounded-2xl shadow-lg p-6">
-          <h3 class="text-lg font-bold text-slate-800 mb-4">
-            <i class="fas fa-history text-purple-600 mr-2"></i>Session History
-          </h3>
-          <div id="sessionHistory" class="space-y-2 max-h-60 overflow-y-auto">
-            <p class="text-sm text-slate-400 text-center py-4">No events yet</p>
+          <div class="app-card bg-white rounded-2xl shadow-lg p-6">
+            <h3 class="text-lg font-bold text-slate-800 mb-4"><i class="fas fa-history text-purple-600 mr-2"></i>Session History</h3>
+            <div id="sessionHistory" class="space-y-2 max-h-60 overflow-y-auto"><p class="text-sm text-slate-400 text-center py-4">No events yet</p></div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- QR Modal -->
+  <!-- Bottom Navigation (Mobile) -->
+  <div id="bottomNav" class="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-sm border-t border-slate-200 h-20 flex justify-around items-center md:hidden bottom-nav">
+      <button id="navHomeBtn" class="nav-btn active flex flex-col items-center gap-1 text-slate-500">
+          <i class="fas fa-home text-2xl"></i>
+          <span class="text-xs font-medium">Home</span>
+      </button>
+      <button id="navTransferBtn" class="nav-btn flex flex-col items-center gap-1 text-slate-500">
+          <i class="fas fa-exchange-alt text-2xl"></i>
+          <span class="text-xs font-medium">Transfer</span>
+      </button>
+  </div>
+
+
+  <!-- Modals -->
   <div id="qrModal" class="modal">
-    <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 text-center">
+    <div class="modal-content bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 text-center">
       <h3 id="qrModalTitle" class="text-lg font-bold text-slate-800 mb-4"></h3>
-      <div id="qrcodeContainer" class="inline-block p-4 bg-white rounded-lg"></div>
-      <p id="qrCodeText" class="font-mono text-lg my-2"></p>
-      <button id="closeQrBtn" class="mt-4 bg-slate-200 text-slate-700 px-6 py-2 rounded-lg">Close</button>
+      <div id="qrcodeContainer" class="inline-block p-4 bg-white rounded-lg ring-1 ring-slate-200"></div>
+      <p id="qrCodeText" class="font-mono text-lg my-2 break-all"></p>
+      <button id="closeQrBtn" class="mt-4 bg-slate-200 text-slate-700 px-6 py-2 rounded-lg btn">Close</button>
     </div>
   </div>
 
-  <!-- Scanner Modal -->
   <div id="qrScannerModal" class="modal">
-    <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4">
+    <div class="modal-content bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4">
       <div class="flex justify-between items-center mb-4">
         <h3 id="qrScannerTitle" class="text-lg font-bold text-slate-800"></h3>
-        <button id="closeScannerBtn" class="text-slate-400 hover:text-slate-600">
-          <i class="fas fa-times text-2xl"></i>
-        </button>
+        <button id="closeScannerBtn" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times text-2xl"></i></button>
       </div>
-      <div id="qr-reader" class="rounded-lg overflow-hidden w-full"></div>
+      <div id="qr-reader" class="rounded-lg overflow-hidden w-full bg-slate-900"></div>
     </div>
   </div>
 
-  <!-- Receive Modal -->
   <div id="fileReceiveModal" class="modal">
-    <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4">
+    <div class="modal-content bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4">
       <div class="text-center mb-6">
-        <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ring-8 ring-blue-50">
           <i class="fas fa-file-download text-3xl text-blue-600"></i>
         </div>
         <h3 class="text-xl font-bold text-slate-800 mb-2">Incoming File</h3>
         <p id="fileReceiveSubtext" class="text-sm text-slate-600"></p>
       </div>
-
       <div class="bg-slate-50 rounded-lg p-4 mb-6 flex items-center gap-3">
         <i id="fileReceiveIcon" class="fas fa-file text-3xl text-blue-600"></i>
         <div class="flex-1 min-w-0">
-          <p id="fileReceiveName" class="font-bold text-slate-800"></p>
+          <p id="fileReceiveName" class="font-bold text-slate-800 truncate"></p>
           <p id="fileReceiveSize" class="text-sm text-slate-500"></p>
           <p id="fileReceiveFrom" class="text-xs text-slate-400 mt-1"></p>
         </div>
       </div>
-
       <div class="flex gap-3">
-        <button id="declineBtn" class="flex-1 bg-slate-200 text-slate-700 px-4 py-3 rounded-lg">
-          <i class="fas fa-times mr-2"></i>Decline
-        </button>
-        <button id="acceptBtn" class="flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg">
-          <i class="fas fa-check mr-2"></i>Accept
-        </button>
+        <button id="declineBtn" class="btn flex-1 bg-slate-200 text-slate-700 px-4 py-3 rounded-lg"><i class="fas fa-times mr-2"></i>Decline</button>
+        <button id="acceptBtn" class="btn flex-1 bg-blue-600 text-white px-4 py-3 rounded-lg"><i class="fas fa-check mr-2"></i>Accept</button>
       </div>
     </div>
   </div>
@@ -244,6 +292,26 @@
 
   // ---------- Elements ----------
   const $ = (id) => document.getElementById(id);
+
+  // ---------- UI Navigation ----------
+  function navigateTo(screenId) {
+      document.querySelectorAll('.app-screen').forEach(screen => {
+          screen.classList.remove('active');
+      });
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+          btn.classList.remove('active');
+      });
+
+      const targetScreen = $(screenId);
+      if (targetScreen) {
+          targetScreen.classList.add('active');
+          if (screenId === 'homeScreen') {
+              $('navHomeBtn')?.classList.add('active');
+          } else if (screenId === 'transferWindow') {
+              $('navTransferBtn')?.classList.add('active');
+          }
+      }
+  }
 
   // ---------- Notifications ----------
   function notify(message, type = "info") {
@@ -260,13 +328,19 @@
       info: "fa-info-circle"
     };
     const n = document.createElement("div");
-    n.className = `fixed top-4 right-4 border-l-4 p-4 rounded-lg shadow-lg z-50 max-w-sm ${colors[type]}`;
+    n.className = `fixed top-4 right-4 border-l-4 p-4 rounded-lg shadow-lg z-50 max-w-sm ${colors[type]} transition-all duration-300 transform translate-x-full opacity-0`;
     n.innerHTML = `<div class="flex items-center">
       <i class="fas ${icons[type]} text-xl mr-3"></i>
       <p class="text-sm">${message}</p>
     </div>`;
     document.body.appendChild(n);
-    setTimeout(() => n.remove(), 3000);
+    requestAnimationFrame(() => {
+        n.classList.remove('translate-x-full', 'opacity-0');
+    });
+    setTimeout(() => {
+        n.classList.add('translate-x-full', 'opacity-0');
+        n.addEventListener('transitionend', () => n.remove());
+    }, 3000);
   }
 
   // ---------- Utils ----------
@@ -298,37 +372,26 @@
 
   // ---------- State ----------
   let peer = null;
-  let myPeerId = null;        // actual peer id after open
-  let preferredPeerId = null; // displayed immediately
+  let myPeerId = null;
+  let preferredPeerId = null;
   let peerReadyResolve = null;
   let isPeerReady = false;
   const peerReady = new Promise((res) => { peerReadyResolve = res; });
-
   let myDeviceName = null;
-
-  let connectionMode = null; // "direct" | "room"
+  let connectionMode = null;
   let roomCode = null;
   let isHost = false;
-
-  const connections = {}; // peerId -> DataConnection
-
-  // File transfer
-  const pendingReceives = new Map(); // transferId -> { meta, chunks[], size, conn, start }
-  const sendQueue = []; // [{ baseId, file }]
-  let currentSend = null; // { baseId, file }
-
-  // Throughput tuning (larger and pipelined)
-  const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
-  const WINDOW_SIZE = 16;             // up to 16 inflight
-
-  // Per-recipient send states
-  const sendStates = new Map(); // transferKey -> { baseId, peerId, file, conn, start, nextIndex, totalChunks, inFlight, ackedCount, ackedBytes }
-  const groupSendTracker = new Map(); // baseId -> { targets:Set, accepted:Set, rejected:Set, completed:Set }
-
-  // QR
+  const connections = {};
+  const pendingReceives = new Map();
+  const sendQueue = [];
+  let currentSend = null;
+  const CHUNK_SIZE = 4 * 1024 * 1024;
+  const WINDOW_SIZE = 16;
+  const sendStates = new Map();
+  const groupSendTracker = new Map();
   let html5QrCode = null;
-  let qrScannerMode = null; // "direct" | "room"
-  let qrScanLocked = false; // prevent duplicates
+  let qrScannerMode = null;
+  let qrScanLocked = false;
 
   // ---------- Peer config ----------
   const peerConfig = {
@@ -346,7 +409,6 @@
   function initialize() {
     loadDeviceName();
     bindUI();
-    // Immediate ID: pre-generate and show
     preferredPeerId = genId();
     $("myPeerId").textContent = preferredPeerId;
     setupPeer(preferredPeerId);
@@ -363,6 +425,17 @@
   }
 
   function bindUI() {
+    // Nav
+    $('navHomeBtn').addEventListener('click', () => navigateTo('homeScreen'));
+    $('navTransferBtn').addEventListener('click', () => {
+        if (!Object.keys(connections).length) {
+            notify("You must be connected to a peer or room first.", "warning");
+            return;
+        }
+        navigateTo('transferWindow');
+    });
+
+    // Home Screen
     $("saveNameBtn").addEventListener("click", () => {
       const name = $("deviceNameInput").value.trim();
       if (name) {
@@ -371,7 +444,6 @@
         notify("Device name saved!", "success");
       }
     });
-
     $("copyMyIdBtn").addEventListener("click", async () => {
       const id = myPeerId || preferredPeerId;
       if (id) {
@@ -379,22 +451,20 @@
         notify("Direct ID copied!", "success");
       }
     });
-
     $("showMyIdQrBtn").addEventListener("click", () => showMyIdQr());
-
     $("connectDirectBtn").addEventListener("click", connectDirect);
     $("scanDirectBtn").addEventListener("click", () => openQRScanner("direct"));
-
     $("createRoomBtn").addEventListener("click", createRoom);
     $("joinRoomBtn").addEventListener("click", joinRoom);
     $("scanRoomBtn").addEventListener("click", () => openQRScanner("room"));
 
+    // Modals
     $("closeQrBtn").addEventListener("click", closeQR);
     $("closeScannerBtn").addEventListener("click", closeQRScanner);
 
+    // Transfer Screen
     $("sendChatBtn").addEventListener("click", sendChatMessage);
     $("chatInput").addEventListener("keypress", (e) => { if (e.key === "Enter") sendChatMessage(); });
-
     const dropZone = $("dropZone");
     dropZone.addEventListener("dragover", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -422,9 +492,7 @@
   // ---------- Peer setup ----------
   function setupPeer(customId) {
     try { if (peer) peer.destroy(); } catch (_) {}
-
     peer = customId ? new Peer(customId, peerConfig) : new Peer(peerConfig);
-
     peer.on("open", (id) => {
       myPeerId = id;
       isPeerReady = true;
@@ -432,17 +500,14 @@
       $("myPeerId").textContent = id;
       updateStatus("Online", "green");
     });
-
     peer.on("connection", (conn) => {
       if (!connectionMode) {
         connectionMode = (isHost || (roomCode && roomCode === myPeerId)) ? "room" : "direct";
       }
       handleConnection(conn);
     });
-
     peer.on("error", (err) => {
       console.error("Peer error:", err);
-      // If ID is taken, retry quickly with a new one
       if (String(err?.type || err).includes("unavailable-id")) {
         preferredPeerId = genId();
         $("myPeerId").textContent = preferredPeerId;
@@ -455,7 +520,6 @@
       notify(msg, "error");
       updateStatus("Error", "red");
     });
-
     peer.on("disconnected", () => {
       updateStatus("Reconnecting...", "orange");
     });
@@ -473,17 +537,18 @@
       orange: "text-orange-600",
       gray: "text-slate-500"
     };
+    const iconColor = { green: 'green-500', red: 'red-500', orange: 'orange-500', gray: 'gray-400'};
     $("connectionStatus").innerHTML =
-      `<i class="fas fa-circle ${colors[color] || colors.gray} mr-1"></i>${text}`;
+      `<i class="fas fa-circle text-${iconColor[color] || iconColor.gray} mr-1"></i>${text}`;
   }
 
-  // ---------- Direct connect ----------
+  // ---------- Connections ----------
   function connectDirect() {
     connectionMode = "direct";
     isHost = false;
     const remoteId = $("remotePeerIdInput").value.trim();
     if (remoteId && !remoteId.startsWith("EZ-")) {
-        notify("Invalid Direct ID format. Use a Room Code to join rooms.", "error");
+        notify("Invalid Direct ID format.", "error");
         return;
     }
     if (!remoteId) { notify("Please enter a Direct ID.", "warning"); return; }
@@ -496,13 +561,11 @@
     });
   }
 
-  // ---------- Rooms ----------
   function createRoom() {
     connectionMode = "room";
     isHost = true;
     roomCode = Math.random().toString(36).toUpperCase().slice(2, 8);
     setupPeer(roomCode);
-    // show immediately; connections will populate
     showTransferWindow();
   }
 
@@ -511,7 +574,7 @@
     if (isJoiningRoom) return;
     const code = $("roomCodeInput").value.trim().toUpperCase();
     if (code && code.startsWith("EZ-")) {
-        notify("Invalid Room Code. Use a Direct ID for P2P connections.", "error");
+        notify("Invalid Room Code format.", "error");
         return;
     }
     if (!code) { notify("Please enter a room code.", "warning"); return; }
@@ -528,26 +591,20 @@
 
   function leaveRoom() {
     if (connectionMode !== "room") { location.reload(); return; }
-    // Inform peers and close connections, then reload host page
     broadcast({ type: "room-closed" });
     Object.values(connections).forEach(c => { try { c.close(); } catch(_) {} });
     setTimeout(() => location.reload(), 300);
   }
 
-  // ---------- Connection lifecycle ----------
   function handleConnection(conn) {
     conn.on("open", () => {
       connections[conn.peer] = conn;
       conn.send({ type: "metadata-sync", deviceName: myDeviceName, mode: connectionMode, roomCode });
-      
       closeQRScanner();
-
       showTransferWindow();
       updatePeerListUI();
     });
-
     conn.on("data", (data) => { routeData(data, conn); });
-
     conn.on("close", () => {
       delete connections[conn.peer];
       if (connectionMode === "direct") {
@@ -557,7 +614,6 @@
         updatePeerListUI();
       }
     });
-
     conn.on("error", (err) => {
       console.error("Connection error:", conn.peer, err);
       notify("A connection encountered an error.", "error");
@@ -572,12 +628,10 @@
     });
   }
 
-  // ---------- Data router ----------
   function routeData(data, conn) {
     if (!data || typeof data !== "object" || typeof data.type !== "string") return;
-
     switch (data.type) {
-      case "metadata-sync": {
+      case "metadata-sync":
         if (connections[conn.peer]) {
           connections[conn.peer].metadata = { deviceName: data.deviceName };
         }
@@ -588,95 +642,49 @@
         updatePeerListUI();
         showTransferWindow();
         break;
-      }
-
-      case "room-closed": {
+      case "room-closed":
         notify("Room closed by host.", "warning");
         setTimeout(() => location.reload(), 400);
         break;
-      }
-
-      // Chat
-      case "chat-message": {
+      case "chat-message":
         displayChatMessage(data);
         beep("info");
         break;
-      }
-
-      // File sharing
-      case "file-request": { onFileRequest(data, conn); break; }
-      case "file-accepted": { onFileAccepted(data, conn); break; }
-      case "file-rejected": { onFileRejected(data, conn); break; }
-      case "file-chunk":   { onFileChunk(data, conn); break; }
-      case "file-ack":     { onAck(data, conn); break; }
-      case "file-cancel":  { onFileCancel(data, conn); break; }
-
+      case "file-request": onFileRequest(data, conn); break;
+      case "file-accepted": onFileAccepted(data, conn); break;
+      case "file-rejected": onFileRejected(data, conn); break;
+      case "file-chunk": onFileChunk(data, conn); break;
+      case "file-ack": onAck(data, conn); break;
+      case "file-cancel": onFileCancel(data, conn); break;
       default: break;
     }
   }
 
-  // ---------- UI: transfer window ----------
+  // ---------- UI Updates ----------
   function showTransferWindow() {
-    if (!isHost) {
-      closeQR();
-    }
-    $("homeScreen").classList.add("hidden");
-    $("transferWindow").classList.remove("hidden");
-
+    if (!isHost) closeQR();
+    navigateTo('transferWindow');
     const header = $("transferHeader");
     const peerListContainer = $("peerListContainer");
-
     if (connectionMode === "direct") {
       const remote = Object.values(connections)[0];
       const peerName = remote?.metadata?.deviceName || "Peer";
-      header.innerHTML = `
-        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="bg-white text-purple-600 w-16 h-16 rounded-full flex items-center justify-center">
-              <i class="fas fa-user text-3xl"></i>
-            </div>
-            <div>
-              <h2 class="text-xl md:text-2xl font-bold">Connected to ${peerName}</h2>
-              <p class="text-xs opacity-75 font-mono">${remote?.peer || ""}</p>
-            </div>
-          </div>
-          <div>
-            <button class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="location.reload()">
-              <i class="fas fa-times mr-2"></i>Disconnect
-            </button>
-          </div>
-        </div>
-      `;
+      header.innerHTML = `<div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-4"><div class="bg-white text-purple-600 w-16 h-16 rounded-full flex items-center justify-center"><i class="fas fa-user text-3xl"></i></div>
+          <div><h2 class="text-xl md:text-2xl font-bold">Connected to ${peerName}</h2><p class="text-xs opacity-75 font-mono">${remote?.peer || ""}</p></div></div>
+          <div><button class="btn bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="location.reload()"><i class="fas fa-times mr-2"></i>Disconnect</button></div></div>`;
       peerListContainer.classList.add("hidden");
       $("sendFileTitle").innerHTML = `<i class="fas fa-paper-plane text-purple-600 mr-2"></i>Send Files`;
       $("chatTitle").innerHTML = `<i class="fas fa-comments text-green-600 mr-2"></i>Direct Chat`;
     } else {
-      header.innerHTML = `
-        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div class="bg-white text-blue-600 w-16 h-16 rounded-full flex items-center justify-center">
-              <i class="fas fa-users text-3xl"></i>
-            </div>
-            <div>
-              <h2 class="text-xl md:text-2xl font-bold">
-                Room Code <span class="font-mono">${roomCode || ""}</span>
-              </h2>
-              <p class="text-sm opacity-90">Your Name • ${myDeviceName}</p>
-            </div>
-          </div>
+      header.innerHTML = `<div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-4"><div class="bg-white text-blue-600 w-16 h-16 rounded-full flex items-center justify-center"><i class="fas fa-users text-3xl"></i></div>
+          <div><h2 class="text-xl md:text-2xl font-bold">Room Code <span class="font-mono">${roomCode || ""}</span></h2><p class="text-sm opacity-90">Your Name • ${myDeviceName}</p></div></div>
           <div class="flex gap-2">
-            <button class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600" onclick="navigator.clipboard.writeText('${roomCode || ""}').then(()=>notify('Room code copied!','success'))">
-              <i class="fas fa-copy mr-2"></i>Copy Code
-            </button>
-            <button class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600" onclick="showRoomQr()">
-              <i class="fas fa-qrcode mr-2"></i>Show QR
-            </button>
-            <button class="bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="leaveRoom()">
-              <i class="fas fa-door-open mr-2"></i>Leave Room
-            </button>
-          </div>
-        </div>
-      `;
+            <button class="btn bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600" onclick="navigator.clipboard.writeText('${roomCode || ""}').then(()=>notify('Room code copied!','success'))"><i class="fas fa-copy mr-2"></i>Copy</button>
+            <button class="btn bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600" onclick="showRoomQr()"><i class="fas fa-qrcode mr-2"></i>QR</button>
+            <button class="btn bg-red-500 text-white px-6 py-3 rounded-lg hover:bg-red-600" onclick="leaveRoom()"><i class="fas fa-door-open mr-2"></i>Leave</button>
+          </div></div>`;
       peerListContainer.classList.remove("hidden");
       $("sendFileTitle").innerHTML = `<i class="fas fa-paper-plane text-blue-600 mr-2"></i>Send Files to Room`;
       $("chatTitle").innerHTML = `<i class="fas fa-comments text-green-600 mr-2"></i>Room Chat`;
@@ -691,9 +699,7 @@
     Object.values(connections).forEach((c) => {
       if (!c || c.peer === myPeerId) return;
       const name = c.metadata?.deviceName || c.peer;
-      html += `<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-sm text-slate-700">
-        <span>${name}</span>
-      </div>`;
+      html += `<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg text-sm text-slate-700"><span>${name}</span></div>`;
     });
     if (!Object.values(connections).filter(c => !!c).length) {
       html += `<p class="text-xs text-slate-400 text-center py-2">You are alone in this room.</p>`;
@@ -701,7 +707,7 @@
     container.innerHTML = html;
   }
 
-  // ---------- File send (per-recipient) ----------
+  // ---------- File Transfer Logic ----------
   function queueFilesForTransfer(fileList) {
     const files = Array.from(fileList);
     if (!files.length) return;
@@ -719,34 +725,24 @@
   function processSendQueue() {
     if (currentSend || sendQueue.length === 0) return;
     const next = sendQueue.shift();
-    const baseId = next.baseId;
-    const file = next.file;
+    const { baseId, file } = next;
     currentSend = { baseId, file };
     removeQueueItemInstant(`pending-${baseId}`);
-
-    const recipients = connectionMode === "direct"
-      ? [Object.values(connections)[0]].filter(Boolean)
-      : Object.values(connections);
-
+    const recipients = connectionMode === "direct" ? [Object.values(connections)[0]].filter(Boolean) : Object.values(connections);
     groupSendTracker.set(baseId, {
       targets: new Set(recipients.map(c => c.peer)),
       accepted: new Set(),
       rejected: new Set(),
       completed: new Set()
     });
-
     for (const c of recipients) {
       const peerName = c.metadata?.deviceName || c.peer;
       const transferKey = getTransferKey(baseId, c.peer);
       addQueueUI(transferKey, `${file.name} → ${peerName}`, true, "Offering...");
       c.send({
         type: "file-request",
-        id: baseId,
-        name: file.name,
-        size: file.size,
-        fileType: file.type,
-        senderId: myPeerId || preferredPeerId,
-        senderName: myDeviceName
+        id: baseId, name: file.name, size: file.size, fileType: file.type,
+        senderId: myPeerId || preferredPeerId, senderName: myDeviceName
       });
     }
   }
@@ -755,72 +751,48 @@
 
   function onFileAccepted(data, conn) {
     if (!currentSend || currentSend.baseId !== data.id) return;
-    const baseId = data.id;
-    const tracker = groupSendTracker.get(baseId);
+    const tracker = groupSendTracker.get(data.id);
     if (tracker) tracker.accepted.add(conn.peer);
-
-    const file = currentSend.file;
-    const transferKey = getTransferKey(baseId, conn.peer);
+    const { file } = currentSend;
+    const transferKey = getTransferKey(data.id, conn.peer);
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     sendStates.set(transferKey, {
-      baseId,
-      peerId: conn.peer,
-      file,
-      conn,
-      start: Date.now(),
-      nextIndex: 0,
-      totalChunks,
-      inFlight: 0,
-      ackedCount: 0,
-      ackedBytes: 0
+      baseId: data.id, peerId: conn.peer, file, conn, start: Date.now(),
+      nextIndex: 0, totalChunks, inFlight: 0, ackedCount: 0, ackedBytes: 0
     });
     pumpChunks(transferKey);
   }
 
   function onFileRejected(data, conn) {
     if (!currentSend || currentSend.baseId !== data.id) return;
-    const baseId = data.id;
-    const tracker = groupSendTracker.get(baseId);
+    const tracker = groupSendTracker.get(data.id);
     if (tracker) {
       tracker.rejected.add(conn.peer);
       tracker.accepted.delete(conn.peer);
     }
-
-    const transferKey = getTransferKey(baseId, conn.peer);
-    updateProgressUI(transferKey, undefined, undefined, "Declined");
-
+    updateProgressUI(getTransferKey(data.id, conn.peer), undefined, undefined, "Declined");
     if (connectionMode === "direct") {
       notify("Transfer rejected.", "warning");
-      finishBaseIfDone(baseId);
-      return;
-    }
-    if (tracker && tracker.rejected.size === tracker.targets.size && tracker.accepted.size === 0) {
-      for (const peerId of tracker.targets) {
-        removeQueueItemInstant(getTransferKey(baseId, peerId));
-      }
+    } else if (tracker && tracker.rejected.size === tracker.targets.size && tracker.accepted.size === 0) {
+      for (const peerId of tracker.targets) removeQueueItemInstant(getTransferKey(data.id, peerId));
       notify("All peers rejected the file.", "warning");
     }
-    finishBaseIfDone(baseId);
+    finishBaseIfDone(data.id);
   }
 
   function onAck(data, conn) {
     const key = getTransferKey(data.transferId, conn.peer);
     const state = sendStates.get(key);
     if (!state) return;
-
     state.inFlight = Math.max(0, state.inFlight - 1);
     state.ackedCount += 1;
     const isLast = (data.chunkIndex === state.totalChunks - 1);
     const sizeAck = isLast ? (state.file.size - CHUNK_SIZE * (state.totalChunks - 1)) : CHUNK_SIZE;
     state.ackedBytes += sizeAck;
-
     const progress = (state.ackedCount / state.totalChunks) * 100;
     const speed = senderSpeedMBps(state);
-    const status = connectionMode === "direct"
-      ? "Sending..."
-      : `Sending to ${state.conn.metadata?.deviceName || state.peerId}`;
+    const status = connectionMode === "direct" ? "Sending..." : `Sending to ${state.conn.metadata?.deviceName || state.peerId}`;
     updateProgressUI(key, progress, speed, status);
-
     if (state.ackedCount >= state.totalChunks) {
       updateProgressUI(key, 100, speed, "Sent!");
       addHistory(`Sent ${state.file.name} (${formatBytes(state.file.size)})`, "send");
@@ -846,15 +818,9 @@
       const end = Math.min(start + CHUNK_SIZE, file.size);
       const arrayBuffer = await file.slice(start, end).arrayBuffer();
       conn.send({
-        type: "file-chunk",
-        payload: arrayBuffer,
-        transferId: state.baseId,
-        chunkIndex: state.nextIndex,
-        totalChunks: state.totalChunks,
-        name: file.name,
-        fileType: file.type,
-        size: file.size,
-        senderName: myDeviceName
+        type: "file-chunk", payload: arrayBuffer, transferId: state.baseId,
+        chunkIndex: state.nextIndex, totalChunks: state.totalChunks, name: file.name,
+        fileType: file.type, size: file.size, senderName: myDeviceName
       });
       state.nextIndex += 1;
       state.inFlight += 1;
@@ -866,7 +832,6 @@
     return (state.ackedBytes / 1024 / 1024) / elapsed;
   }
 
-  // When a base file is completely decided and no active streams remain, advance
   function finishBaseIfDone(baseId) {
     const tracker = groupSendTracker.get(baseId);
     if (!tracker) {
@@ -876,23 +841,12 @@
       }
       return;
     }
-
     const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
     const decidedCount = tracker.completed.size + tracker.rejected.size;
-
     if (decidedCount >= tracker.targets.size && !activeForBase) {
       currentSend = (currentSend && currentSend.baseId === baseId) ? null : currentSend;
       groupSendTracker.delete(baseId);
       processSendQueue();
-    }
-  }
-
-  // ---------- Cancel (sender only) ----------
-  function cancelPending(baseId) {
-    const idx = sendQueue.findIndex(t => t.baseId === baseId);
-    if (idx !== -1) {
-      sendQueue.splice(idx, 1);
-      removeQueueItemInstant(`pending-${baseId}`);
     }
   }
 
@@ -902,64 +856,37 @@
     if (conn && conn.open) { conn.send({ type: "file-cancel", id: baseId }); }
     if (sendStates.has(transferKey)) { sendStates.delete(transferKey); }
     updateProgressUI(transferKey, undefined, undefined, "Cancelled");
-
     const tracker = groupSendTracker.get(baseId);
     if (tracker) {
       tracker.rejected.add(peerId);
       tracker.accepted.delete(peerId);
-      // If direct mode, treat as entire send cancellation and finish immediately
       if (connectionMode === "direct") {
-        // remove any other UI rows for this baseId
-        for (const target of tracker.targets) {
-          removeQueueItemInstant(getTransferKey(baseId, target));
-        }
+        for (const target of tracker.targets) removeQueueItemInstant(getTransferKey(baseId, target));
         groupSendTracker.delete(baseId);
         if (currentSend && currentSend.baseId === baseId) currentSend = null;
         processSendQueue();
         return;
       }
-      // Room mode: continue for others, or finish if everyone decided
       finishBaseIfDone(baseId);
     } else {
-      // No tracker (edge): just proceed
       if (currentSend && currentSend.baseId === baseId) currentSend = null;
       processSendQueue();
     }
   }
 
-  // ---------- File receive ----------
   function onFileRequest(meta, conn) {
     if (meta.senderId === (myPeerId || preferredPeerId)) return;
-
-    const iconMap = {
-      "jpg": "fa-file-image",
-      "jpeg": "fa-file-image",
-      "png": "fa-file-image",
-      "pdf": "fa-file-pdf",
-      "zip": "fa-file-zipper",
-      "mp4": "fa-file-video",
-      "mp3": "fa-file-audio"
-    };
+    const iconMap = { "jpg": "fa-file-image", "jpeg": "fa-file-image", "png": "fa-file-image", "pdf": "fa-file-pdf", "zip": "fa-file-zipper", "mp4": "fa-file-video", "mp3": "fa-file-audio" };
     const ext = (meta.name.split(".").pop() || "").toLowerCase();
-    $("fileReceiveSubtext").textContent = connectionMode === "direct"
-      ? "A peer wants to send you a file"
-      : "A peer in the room wants to send a file";
+    $("fileReceiveSubtext").textContent = connectionMode === "direct" ? "A peer wants to send you a file" : "A peer in the room wants to send a file";
     $("fileReceiveName").textContent = meta.name;
     $("fileReceiveSize").textContent = formatBytes(meta.size);
     $("fileReceiveFrom").textContent = `From ${meta.senderName || conn.peer}`;
     $("fileReceiveIcon").className = `fas ${iconMap[ext] || "fa-file"} text-3xl text-blue-600`;
-
     $("fileReceiveModal").dataset.transferId = meta.id;
     $("fileReceiveModal").dataset.fromPeer = conn.peer;
     $("fileReceiveModal").classList.add("show");
-
-    pendingReceives.set(meta.id, {
-      meta,
-      conn,
-      chunks: [],
-      receivedSize: 0,
-      start: Date.now()
-    });
+    pendingReceives.set(meta.id, { meta, conn, chunks: [], receivedSize: 0, start: Date.now() });
   }
 
   $("acceptBtn").addEventListener("click", () => {
@@ -984,31 +911,23 @@
   function onFileChunk(data, conn) {
     const { payload, transferId, chunkIndex, totalChunks, fileType, name, size } = data;
     const p = pendingReceives.get(transferId);
-    if (!p) return; // may have been cancelled
-
+    if (!p) return;
     p.chunks[chunkIndex] = payload;
     p.receivedSize += (payload?.byteLength || 0);
-
     const progress = (p.receivedSize / size) * 100;
     const elapsed = (Date.now() - p.start) / 1000;
     const speedMBps = elapsed > 0 ? (p.receivedSize / 1024 / 1024) / elapsed : 0;
-
     updateProgressUI(transferId, progress, speedMBps, "Receiving...");
     conn.send({ type: "file-ack", transferId, chunkIndex });
-
     if (p.chunks.filter(Boolean).length === totalChunks) {
       try {
-        const ordered = [];
-        for (let i = 0; i < totalChunks; i++) ordered.push(new Uint8Array(p.chunks[i]));
+        const ordered = Array.from({length: totalChunks}).map((_, i) => new Uint8Array(p.chunks[i]));
         const blob = new Blob(ordered, { type: fileType || "application/octet-stream" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name || "download";
-        document.body.appendChild(a);
         a.click();
-        document.body.removeChild(a);
         URL.revokeObjectURL(a.href);
-
         updateProgressUI(transferId, undefined, undefined, "Completed!");
         addHistory(`Received ${name} (${formatBytes(size)})`, "receive");
         beep("complete");
@@ -1024,8 +943,7 @@
 
   function onFileCancel(data, conn) {
     const id = data.id;
-    const p = pendingReceives.get(id);
-    if (p) {
+    if (pendingReceives.has(id)) {
       if ($("fileReceiveModal").dataset.transferId === id) {
         $("fileReceiveModal").classList.remove("show");
       }
@@ -1035,39 +953,30 @@
     updateProgressUI(id, undefined, undefined, "Cancelled");
   }
 
-  // ---------- Queue UI ----------
+  // ---------- Queue UI & History & Chat ----------
   function addQueueUI(id, fileName, isSender, initialStatus = null) {
     const q = $("fileQueue");
     if (q.querySelector("p")) q.innerHTML = "";
     const el = document.createElement("div");
     el.id = `transfer-${id}`;
     el.className = "queue-item";
-    el.innerHTML = `
-      <div class="bg-slate-100 rounded-lg p-3 mb-2">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-medium text-slate-800 break-words" title="${fileName}">${fileName}</span>
-          <div class="flex items-center gap-3">
-            <span class="text-sm font-medium text-blue-600" id="percent-${id}">0%</span>
-            ${isSender ? `<button id="cancel-${id}" class="cancel-btn text-red-600 hover:text-red-700" title="Cancel"><i class="fas fa-times-circle"></i></button>` : ``}
-          </div>
-        </div>
-        <div class="w-full bg-slate-200 rounded-full h-2">
-          <div id="bar-${id}" class="bg-blue-600 h-2 rounded-full" style="width:0%"></div>
-        </div>
-        <div class="flex justify-between text-xs text-slate-600 mt-1">
-          <span id="speed-${id}">0.00 MB/s</span>
-          <span id="status-${id}">${initialStatus ?? (isSender ? "Offering..." : "Waiting...")}</span>
+    el.innerHTML = `<div class="bg-slate-100 rounded-lg p-3 mb-2">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-medium text-slate-800 break-all" title="${fileName}">${fileName}</span>
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-medium text-blue-600" id="percent-${id}">0%</span>
+          ${isSender ? `<button id="cancel-${id}" class="cancel-btn text-red-600 hover:text-red-700" title="Cancel"><i class="fas fa-times-circle"></i></button>` : ``}
         </div>
       </div>
-    `;
+      <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden"><div id="bar-${id}" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width:0%"></div></div>
+      <div class="flex justify-between text-xs text-slate-600 mt-1"><span id="speed-${id}">0.00 MB/s</span><span id="status-${id}">${initialStatus ?? "Waiting..."}</span></div>
+      </div>`;
     q.appendChild(el);
-
     if (isSender) {
-      const btn = document.getElementById(`cancel-${id}`);
+      const btn = $(`cancel-${id}`);
       if (btn) {
         if (id.startsWith("pending-")) {
-          const baseId = id.slice("pending-".length);
-          btn.addEventListener("click", () => cancelPending(baseId));
+          btn.addEventListener("click", () => cancelPending(id.slice("pending-".length)));
         } else {
           btn.addEventListener("click", () => cancelTransfer(id));
         }
@@ -1076,24 +985,14 @@
   }
 
   function updateProgressUI(id, progress, speedMBps, status) {
-    const root = document.getElementById(`transfer-${id}`);
+    const root = $(`transfer-${id}`);
     if (!root) return;
-    const percentEl = document.getElementById(`percent-${id}`);
-    const barEl = document.getElementById(`bar-${id}`);
-    const speedEl = document.getElementById(`speed-${id}`);
-    const statusEl = document.getElementById(`status-${id}`);
-
     if (typeof progress === "number") {
-      percentEl.textContent = `${Math.round(progress)}%`;
-      barEl.style.width = `${progress}%`;
+      $(`percent-${id}`).textContent = `${Math.round(progress)}%`;
+      $(`bar-${id}`).style.width = `${progress}%`;
     }
-    if (typeof speedMBps === "number") {
-      speedEl.textContent = `${speedMBps.toFixed(2)} MB/s`;
-    }
-    if (typeof status === "string") {
-      statusEl.textContent = status;
-    }
-
+    if (typeof speedMBps === "number") $(`speed-${id}`).textContent = `${speedMBps.toFixed(2)} MB/s`;
+    if (typeof status === "string") $(`status-${id}`).textContent = status;
     if (["Completed!", "Declined", "Error!", "Sent!", "Cancelled"].includes(status)) {
       setTimeout(() => {
         root.remove();
@@ -1105,19 +1004,36 @@
   }
 
   function removeQueueItemInstant(id) {
-    const root = document.getElementById(`transfer-${id}`);
+    const root = $(`transfer-${id}`);
     if (root) root.remove();
-    if (!document.querySelector("[id^='transfer-']")) {
-      $("fileQueue").innerHTML = `<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>`;
+    if (!$("fileQueue").children.length) {
+        $("fileQueue").innerHTML = `<p class="text-sm text-slate-400 text-center py-4">No active transfers</p>`;
     }
   }
 
-  // ---------- Chat ----------
+  function displayChatMessage(data, isSent = false) {
+    const box = $("chatMessages");
+    const wrapper = document.createElement("div");
+    wrapper.className = `flex flex-col ${isSent ? "items-end" : "items-start"}`;
+    if (connectionMode === "room") {
+      const name = document.createElement("span");
+      name.className = "text-xs text-slate-500 mb-1 px-2";
+      name.textContent = isSent ? "You" : (data.senderName || "Peer");
+      wrapper.appendChild(name);
+    }
+    const bubble = document.createElement("div");
+    bubble.className = `p-3 rounded-2xl max-w-xs break-words ${isSent ? "chat-bubble-sent" : "chat-bubble-received"}`;
+    bubble.textContent = data.content || "";
+    wrapper.appendChild(bubble);
+    box.appendChild(wrapper);
+    box.scrollTop = box.scrollHeight;
+    if (!isSent) beep("info");
+  }
+  
   function sendChatMessage() {
     const input = $("chatInput");
     const message = input.value.trim();
     if (!message) return;
-
     const payload = { type: "chat-message", content: message, senderName: myDeviceName };
     if (connectionMode === "direct") {
       const c = Object.values(connections)[0];
@@ -1128,51 +1044,19 @@
     displayChatMessage({ content: message, senderName: myDeviceName }, true);
     input.value = "";
   }
-
-  function displayChatMessage(data, isSent = false) {
-    const box = $("chatMessages");
-    const wrapper = document.createElement("div");
-    wrapper.className = `flex flex-col ${isSent ? "items-end" : "items-start"}`;
-    if (connectionMode === "room") {
-      const name = document.createElement("span");
-      name.className = "text-xs text-slate-500 mb-1";
-      name.textContent = isSent ? "You" : (data.senderName || "Peer");
-      wrapper.appendChild(name);
-    }
-    const bubble = document.createElement("div");
-    bubble.className = `p-2 rounded-lg max-w-xs break-words ${isSent ? "chat-bubble-sent" : "chat-bubble-received"}`;
-    bubble.textContent = data.content || "";
-    wrapper.appendChild(bubble);
-    box.appendChild(wrapper);
-    box.scrollTop = box.scrollHeight;
-    if (!isSent) beep("info");
-  }
-
-  // ---------- History (show all file events in detail) ----------
+  
   function addHistory(message, type = "info") {
     if (!["send", "receive", "decline"].includes(type)) return;
     const h = $("sessionHistory");
-    const placeholder = h.querySelector("p");
-    if (placeholder) placeholder.remove();
-
-    const icons = {
-      send: "fa-arrow-up text-blue-600",
-      receive: "fa-arrow-down text-green-600",
-      decline: "fa-times-circle text-red-500"
-    };
+    if (h.querySelector("p")) h.innerHTML = "";
+    const icons = { send: "fa-arrow-up text-blue-600", receive: "fa-arrow-down text-green-600", decline: "fa-times-circle text-red-500" };
     const div = document.createElement("div");
     div.className = "flex items-center gap-3 p-2 bg-slate-50 rounded-lg";
-    div.innerHTML = `
-      <i class="fas ${icons[type]}"></i>
-      <div class="flex-1 min-w-0">
-        <p class="text-sm text-slate-800 whitespace-normal break-words">${message}</p>
-        <p class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</p>
-      </div>
-    `;
+    div.innerHTML = `<i class="fas ${icons[type]} w-5 text-center"></i><div class="flex-1 min-w-0"><p class="text-sm text-slate-800 truncate">${message}</p><p class="text-xs text-slate-500">${new Date().toLocaleTimeString()}</p></div>`;
     h.insertBefore(div, h.firstChild);
   }
 
-  // ---------- QR ----------
+  // ---------- QR Modals ----------
   function showMyIdQr() {
     $("qrModalTitle").textContent = "Your Direct ID";
     const container = $("qrcodeContainer");
@@ -1197,8 +1081,8 @@
   }
 
   function openQRScanner(mode) {
-    if (html5QrCode) { try { html5QrCode.stop(); html5QrCode.clear(); } catch(_) {} }
-    qrScannerMode = mode; // "direct" | "room"
+    if (html5QrCode && html5QrCode.isScanning) return;
+    qrScannerMode = mode;
     qrScanLocked = false;
     $("qrScannerTitle").textContent = `Scan ${mode === "direct" ? "Peer" : "Room"} QR Code`;
     $("qrScannerModal").classList.add("show");
@@ -1209,45 +1093,59 @@
       (decodedText) => {
         if (qrScanLocked) return;
         qrScanLocked = true;
-
+        beep("complete");
         if (qrScannerMode === "direct") {
-          $("remotePeerIdInput").value = decodedText;
-          closeQRScanner(); // auto-close for direct only
-          closeQR();
-          connectDirect();
+            if (!decodedText.startsWith("EZ-")) {
+                notify("Invalid QR Code for Direct Connection.", "error");
+                setTimeout(() => qrScanLocked = false, 1500);
+                return;
+            }
+            $("remotePeerIdInput").value = decodedText;
+            closeQRScanner().then(connectDirect);
         } else {
-          $("roomCodeInput").value = decodedText;
-          // do not auto close for room; just attempt join once
-          joinRoom();
-          // allow user to keep the scanner open if they want to rescan
-          setTimeout(() => { qrScanLocked = false; }, 1000);
+            if (decodedText.startsWith("EZ-")) {
+                notify("Invalid QR Code for Room Connection.", "error");
+                setTimeout(() => qrScanLocked = false, 1500);
+                return;
+            }
+            $("roomCodeInput").value = decodedText;
+            joinRoom();
+            setTimeout(() => qrScanLocked = false, 1500);
         }
       },
-      (errMsg) => { /* ignore scan errors */ }
+      (errMsg) => {}
     ).catch((err) => {
       console.error("QR start error:", err);
-      notify("Camera error.", "error");
+      notify("Could not start camera.", "error");
+      closeQRScanner();
     });
   }
 
   function closeQRScanner() {
-    const modal = $("qrScannerModal");
-    if (!modal.classList.contains("show")) return;
-    const stop = async () => {
-      if (html5QrCode) {
-        try { await html5QrCode.stop(); } catch(_) {}
-        try { await html5QrCode.clear(); } catch(_) {}
-        html5QrCode = null;
-      }
-    };
-    stop().finally(() => {
-      modal.classList.remove("show");
-      const reader = $("qr-reader");
-      if (reader) reader.innerHTML = "";
+    return new Promise((resolve) => {
+        const modal = $("qrScannerModal");
+        if (!modal.classList.contains("show") || !html5QrCode) {
+            resolve();
+            return;
+        }
+        html5QrCode.stop()
+            .then(() => {
+                html5QrCode.clear();
+                html5QrCode = null;
+                modal.classList.remove("show");
+                $("qr-reader").innerHTML = "";
+                resolve();
+            })
+            .catch(err => {
+                console.error("QR stop error:", err);
+                html5QrCode = null;
+                modal.classList.remove("show");
+                $("qr-reader").innerHTML = "";
+                resolve();
+            });
     });
   }
-  // ---------- End of continuation ----------
-</script>
+  </script>
 </body>
 </html>
 
