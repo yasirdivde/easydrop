@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Share - Instant File Transfer</title>
+    <meta name="description" content="Share files instantly with nearby devices using peer-to-peer technology. Fast, secure, and easy file transfer.">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Custom Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        secondary: '#6366F1',
+                        accent: '#3B82F6',
+                    },
+                    borderRadius: {
+                        '4xl': '2rem',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #8B5CF6 0%, #6366F1 50%, #3B82F6 100%);
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        
+        .card {
+            background: linear-gradient(180deg, #ffffff 0%, #f8f9ff 100%);
+            box-shadow: 0 20px 60px -10px rgba(139, 92, 246, 0.25);
+        }
+        
+        .avatar {
+            background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%);
+            box-shadow: 0 30px 80px -20px rgba(139, 92, 246, 0.4);
+        }
+        
+        .progress-circle {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(59, 130, 246, 0.1) 100%);
+        }
+        
+        .transition-smooth {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .animate-pulse-slow {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+    
+    <!-- Connect Screen -->
+    <div id="connectScreen" class="flex items-center justify-center min-h-screen p-6">
+        <div class="w-full max-w-md card rounded-4xl p-8 animate-fade-in">
+            <div class="flex items-center justify-between mb-8">
+                <h1 class="text-xl font-semibold text-gray-800">Share Files</h1>
+                <button class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center transition-smooth">
+                    <i class="fas fa-qrcode text-gray-600"></i>
+                </button>
+            </div>
+            
+            <div class="flex flex-col items-center py-12">
+                <div class="w-32 h-32 rounded-full avatar flex items-center justify-center">
+                    <i class="fas fa-user text-white text-6xl"></i>
+                </div>
+                <h2 class="mt-6 text-2xl font-bold text-gray-800">Your Device</h2>
+                <p class="mt-2 text-sm text-gray-500">Waiting for connection...</p>
+                
+                <div class="mt-8 w-full bg-gray-100 rounded-2xl p-4 flex items-center justify-between">
+                    <code id="connectionId" class="text-sm font-mono text-primary font-semibold">LOADING...</code>
+                    <button onclick="copyConnectionId()" class="w-10 h-10 rounded-full hover:bg-white flex items-center justify-center transition-smooth">
+                        <i class="fas fa-copy text-primary"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mt-8 space-y-4">
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-gray-200"></div>
+                    </div>
+                    <div class="relative flex justify-center text-xs">
+                        <span class="bg-white px-3 text-gray-500">Or connect to device</span>
+                    </div>
+                </div>
+                
+                <div class="flex gap-2">
+                    <input 
+                        type="text" 
+                        id="peerInput" 
+                        placeholder="Enter connection ID"
+                        class="flex-1 px-4 py-3 rounded-2xl bg-gray-100 border-0 focus:ring-2 focus:ring-primary outline-none transition-smooth"
+                        onkeypress="if(event.key === 'Enter') connectToPeer()"
+                    >
+                    <button onclick="connectToPeer()" class="px-6 py-3 bg-primary text-white rounded-2xl hover:bg-opacity-90 transition-smooth">
+                        <i class="fas fa-wifi"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Connected Screen -->
+    <div id="connectedScreen" class="hidden flex items-center justify-center min-h-screen p-6">
+        <div class="w-full max-w-md card rounded-4xl p-8 animate-fade-in">
+            <h1 class="text-2xl font-bold text-gray-800 mb-2">Connected</h1>
+            <p class="text-sm text-gray-500 mb-8">Ready to share files</p>
+            <button onclick="showFileSelect()" class="w-full py-6 bg-primary text-white rounded-2xl hover:bg-opacity-90 transition-smooth flex items-center justify-center gap-2">
+                <i class="fas fa-paper-plane"></i>
+                <span class="font-semibold">Send File</span>
+            </button>
+        </div>
+    </div>
+    
+    <!-- File Select Modal -->
+    <div id="fileSelectModal" class="hidden fixed inset-0 bg-black bg-opacity-20 backdrop-blur-sm flex items-center justify-center p-6 z-50">
+        <div class="w-full max-w-md card rounded-4xl p-8 animate-fade-in">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xl font-semibold text-gray-800">Select File</h2>
+                <button onclick="hideFileSelect()" class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center transition-smooth">
+                    <i class="fas fa-times text-gray-600"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-6">
+                <div onclick="document.getElementById('fileInput').click()" 
+                     class="border-2 border-dashed border-gray-300 rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer hover:border-primary hover:bg-purple-50 transition-smooth">
+                    <i class="fas fa-upload text-primary text-5xl mb-4"></i>
+                    <p class="text-sm font-medium text-gray-800 mb-1">Choose a file to send</p>
+                    <p class="text-xs text-gray-500">Click to browse files</p>
+                    <input type="file" id="fileInput" onchange="handleFileSelect(event)">
+                </div>
+                
+                <div class="space-y-3">
+                    <p class="text-xs font-medium text-gray-500 px-2">Recently Accessed</p>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div class="flex flex-col items-center p-3 rounded-2xl hover:bg-gray-100 cursor-not-allowed opacity-50 transition-smooth">
+                            <div class="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center text-primary">
+                                <i class="fas fa-image text-2xl"></i>
+                            </div>
+                            <p class="text-xs mt-2 truncate w-full text-center text-gray-500">candid.png</p>
+                        </div>
+                        <div class="flex flex-col items-center p-3 rounded-2xl hover:bg-gray-100 cursor-not-allowed opacity-50 transition-smooth">
+                            <div class="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center text-primary">
+                                <i class="fas fa-file-pdf text-2xl"></i>
+                            </div>
+                            <p class="text-xs mt-2 truncate w-full text-center text-gray-500">payslip.pdf</p>
+                        </div>
+                        <div class="flex flex-col items-center p-3 rounded-2xl hover:bg-gray-100 cursor-not-allowed opacity-50 transition-smooth">
+                            <div class="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center text-primary">
+                                <i class="fas fa-file-alt text-2xl"></i>
+                            </div>
+                            <p class="text-xs mt-2 truncate w-full text-center text-gray-500">info.plist</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Transfer Modal -->
+    <div id="transferModal" class="hidden fixed inset-0 bg-black bg-opacity-20 backdrop-blur-sm flex items-center justify-center p-6 z-50">
+        <div class="w-full max-w-md card rounded-4xl p-8 animate-fade-in">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xl font-semibold text-gray-800"><span id="transferDirection">Sending</span> File</h2>
+                <button onclick="cancelTransfer()" class="w-10 h-10 rounded-full hover:bg-gray-100 flex items-center justify-center transition-smooth">
+                    <i class="fas fa-times text-gray-600"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-6">
+                <div class="text-center">
+                    <p id="fileName" class="font-medium text-gray-800 mb-1">file.pdf</p>
+                    <p id="fileSize" class="text-sm text-gray-500">13 MB</p>
+                </div>
+                
+                <div class="flex flex-col items-center justify-center py-8">
+                    <div class="relative">
+                        <div class="w-32 h-32 rounded-full progress-circle flex items-center justify-center">
+                            <div id="progressText" class="text-4xl font-bold text-primary">0%</div>
+                        </div>
+                        <div id="completePulse" class="hidden absolute inset-0 flex items-center justify-center">
+                            <div class="w-32 h-32 rounded-full bg-gradient-to-br from-primary to-accent animate-pulse-slow opacity-20"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div id="progressBar" class="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300" style="width: 0%"></div>
+                </div>
+                
+                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
+                    <div class="flex items-center gap-3">
+                        <div class="w-12 h-12 rounded-full avatar flex items-center justify-center">
+                            <i class="fas fa-user text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-gray-800"><span id="transferAction">Sending to</span> Device</p>
+                            <p id="timeRemaining" class="text-xs text-gray-500">Calculating...</p>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <p id="transferSpeed" class="text-sm font-semibold text-primary">0 MB/s</p>
+                    </div>
+                </div>
+                
+                <button id="downloadBtn" onclick="downloadFile()" class="hidden w-full py-6 bg-primary text-white rounded-2xl hover:bg-opacity-90 transition-smooth flex items-center justify-center gap-2">
+                    <i class="fas fa-download"></i>
+                    <span class="font-semibold">Download File</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Notification -->
+    <div id="toast" class="hidden fixed top-6 right-6 bg-white card rounded-2xl p-4 shadow-lg z-50 animate-fade-in">
+        <div class="flex items-center gap-3">
+            <i id="toastIcon" class="fas fa-check-circle text-green-500 text-xl"></i>
+            <p id="toastMessage" class="text-sm font-medium text-gray-800">Success!</p>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let state = {
+            screen: 'connect',
+            connectionId: '',
+            peerConnection: null,
+            dataChannel: null,
+            selectedFile: null,
+            receivedData: [],
+            receivedSize: 0,
+            totalSize: 0,
+            startTime: null,
+            isSending: false,
+            receivedFileName: ''
+        };
+
+        // Initialize
+        function init() {
+            // Generate connection ID
+            state.connectionId = Math.random().toString(36).substring(2, 10).toUpperCase();
+            document.getElementById('connectionId').textContent = state.connectionId;
+        }
+
+        // Toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const icon = document.getElementById('toastIcon');
+            const msg = document.getElementById('toastMessage');
+            
+            icon.className = type === 'success' ? 
+                'fas fa-check-circle text-green-500 text-xl' : 
+                'fas fa-exclamation-circle text-red-500 text-xl';
+            msg.textContent = message;
+            
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 3000);
+        }
+
+        // Copy connection ID
+        function copyConnectionId() {
+            navigator.clipboard.writeText(state.connectionId);
+            showToast('Connection ID copied!');
+        }
+
+        // WebRTC Setup
+        function setupPeerConnection() {
+            state.peerConnection = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            });
+        }
+
+        // Connect to peer (simplified for demo)
+        async function connectToPeer() {
+            const peerInput = document.getElementById('peerInput').value.trim();
+            if (!peerInput) {
+                showToast('Please enter a connection ID', 'error');
+                return;
+            }
+
+            try {
+                setupPeerConnection();
+                
+                // Create data channel
+                state.dataChannel = state.peerConnection.createDataChannel('fileTransfer');
+                setupDataChannel();
+                
+                // For demo purposes, show connected screen immediately
+                showScreen('connected');
+                showToast('Connected to device!');
+            } catch (error) {
+                console.error('Connection error:', error);
+                showToast('Failed to connect', 'error');
+            }
+        }
+
+        // Setup data channel
+        function setupDataChannel() {
+            if (!state.dataChannel) return;
+
+            state.dataChannel.onopen = () => {
+                console.log('Data channel opened');
+            };
+
+            state.dataChannel.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    // Metadata
+                    const metadata = JSON.parse(event.data);
+                    state.receivedFileName = metadata.fileName;
+                    state.totalSize = metadata.fileSize;
+                    state.receivedSize = 0;
+                    state.receivedData = [];
+                    state.startTime = Date.now();
+                    state.isSending = false;
+                    
+                    // Show transfer modal
+                    showTransferModal(metadata.fileName, metadata.fileSize, false);
+                } else {
+                    // File data
+                    state.receivedData.push(event.data);
+                    state.receivedSize += event.data.byteLength;
+                    
+                    const progress = (state.receivedSize / state.totalSize) * 100;
+                    const elapsed = (Date.now() - state.startTime) / 1000;
+                    const speed = state.receivedSize / elapsed / 1024 / 1024;
+                    
+                    updateProgress(progress, speed);
+                    
+                    if (state.receivedSize >= state.totalSize) {
+                        completeTransfer();
+                    }
+                }
+            };
+        }
+
+        // File selection
+        function showFileSelect() {
+            document.getElementById('fileSelectModal').classList.remove('hidden');
+        }
+
+        function hideFileSelect() {
+            document.getElementById('fileSelectModal').classList.add('hidden');
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            state.selectedFile = file;
+            hideFileSelect();
+            sendFile(file);
+        }
+
+        // Send file
+        async function sendFile(file) {
+            if (!state.dataChannel || state.dataChannel.readyState !== 'open') {
+                // For demo, simulate transfer without actual WebRTC
+                simulateTransfer(file);
+                return;
+            }
+
+            state.isSending = true;
+            state.startTime = Date.now();
+            
+            showTransferModal(file.name, file.size, true);
+
+            // Send metadata
+            const metadata = {
+                fileName: file.name,
+                fileSize: file.size
+            };
+            state.dataChannel.send(JSON.stringify(metadata));
+
+            // Send file in chunks
+            const chunkSize = 16384;
+            let offset = 0;
+
+            const readSlice = (offset) => {
+                const slice = file.slice(offset, offset + chunkSize);
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    if (e.target?.result && state.dataChannel) {
+                        state.dataChannel.send(e.target.result);
+                        offset += chunkSize;
+
+                        const progress = Math.min((offset / file.size) * 100, 100);
+                        const elapsed = (Date.now() - state.startTime) / 1000;
+                        const speed = offset / elapsed / 1024 / 1024;
+
+                        updateProgress(progress, speed);
+
+                        if (offset < file.size) {
+                            readSlice(offset);
+                        } else {
+                            completeTransfer();
+                        }
+                    }
+                };
+
+                reader.readAsArrayBuffer(slice);
+            };
+
+            readSlice(0);
+        }
+
+        // Simulate transfer (for demo without real peer connection)
+        function simulateTransfer(file) {
+            state.isSending = true;
+            state.startTime = Date.now();
+            state.selectedFile = file;
+            
+            showTransferModal(file.name, file.size, true);
+            
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 10;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => completeTransfer(), 500);
+                }
+                
+                const speed = 2.3 + Math.random() * 1.5;
+                updateProgress(progress, speed);
+            }, 300);
+        }
+
+        // Show transfer modal
+        function showTransferModal(fileName, fileSize, isSending) {
+            document.getElementById('transferDirection').textContent = isSending ? 'Sending' : 'Receiving';
+            document.getElementById('transferAction').textContent = isSending ? 'Sending to' : 'Receiving from';
+            document.getElementById('fileName').textContent = fileName;
+            document.getElementById('fileSize').textContent = formatFileSize(fileSize);
+            document.getElementById('downloadBtn').classList.add('hidden');
+            document.getElementById('completePulse').classList.add('hidden');
+            document.getElementById('transferModal').classList.remove('hidden');
+        }
+
+        // Update progress
+        function updateProgress(progress, speed) {
+            const progressPercent = Math.min(Math.round(progress), 100);
+            document.getElementById('progressText').textContent = progressPercent + '%';
+            document.getElementById('progressBar').style.width = progressPercent + '%';
+            document.getElementById('transferSpeed').textContent = speed.toFixed(1) + ' MB/s';
+            
+            const remainingBytes = state.selectedFile ? 
+                state.selectedFile.size * (1 - progress / 100) : 
+                state.totalSize * (1 - progress / 100);
+            const estimatedTime = speed > 0 ? remainingBytes / (speed * 1024 * 1024) : 0;
+            document.getElementById('timeRemaining').textContent = 
+                progress >= 100 ? 'Transfer complete' : formatTime(estimatedTime) + ' remaining';
+        }
+
+        // Complete transfer
+        function completeTransfer() {
+            document.getElementById('completePulse').classList.remove('hidden');
+            showToast('Transfer complete!');
+            
+            if (!state.isSending && state.receivedData.length > 0) {
+                document.getElementById('downloadBtn').classList.remove('hidden');
+            }
+        }
+
+        // Download file
+        function downloadFile() {
+            if (state.receivedData.length > 0) {
+                const blob = new Blob(state.receivedData);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = state.receivedFileName;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('File downloaded!');
+            } else if (state.selectedFile) {
+                // For demo, download the selected file
+                const url = URL.createObjectURL(state.selectedFile);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = state.selectedFile.name;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast('File downloaded!');
+            }
+        }
+
+        // Cancel transfer
+        function cancelTransfer() {
+            document.getElementById('transferModal').classList.add('hidden');
+            state.receivedData = [];
+            state.receivedSize = 0;
+        }
+
+        // Screen navigation
+        function showScreen(screenName) {
+            document.getElementById('connectScreen').classList.add('hidden');
+            document.getElementById('connectedScreen').classList.add('hidden');
+            
+            if (screenName === 'connect') {
+                document.getElementById('connectScreen').classList.remove('hidden');
+            } else if (screenName === 'connected') {
+                document.getElementById('connectedScreen').classList.remove('hidden');
+            }
+        }
+
+        // Utility functions
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function formatTime(seconds) {
+            if (seconds < 60) return Math.round(seconds) + 's';
+            return Math.round(seconds / 60) + 'm';
+        }
+
+        // Initialize on load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
