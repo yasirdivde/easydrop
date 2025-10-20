@@ -532,7 +532,6 @@
       connections[conn.peer] = conn;
       conn.send({ type: "metadata-sync", deviceName: myDeviceName, mode: connectionMode, roomCode });
       
-      // *** FIX: Close the scanner modal on any successful connection ***
       closeQRScanner();
 
       showTransferWindow();
@@ -610,8 +609,10 @@
 
   // ---------- UI: transfer window ----------
   function showTransferWindow() {
-    // Close own QR modal; scanner auto-close only for direct handled in openQRScanner
-    closeQR();
+    // *** FIX: Only close QR modal if not a room host, allowing multiple joins ***
+    if (!isHost) {
+      closeQR();
+    }
     $("homeScreen").classList.add("hidden");
     $("transferWindow").classList.remove("hidden");
 
@@ -773,7 +774,10 @@
     if (!currentSend || currentSend.baseId !== data.id) return;
     const baseId = data.id;
     const tracker = groupSendTracker.get(baseId);
-    if (tracker) tracker.rejected.add(conn.peer);
+    if (tracker) {
+      tracker.rejected.add(conn.peer);
+      tracker.accepted.delete(conn.peer);
+    }
 
     const transferKey = getTransferKey(baseId, conn.peer);
     updateProgressUI(transferKey, undefined, undefined, "Declined");
@@ -788,8 +792,8 @@
         removeQueueItemInstant(getTransferKey(baseId, peerId));
       }
       notify("All peers rejected the file.", "warning");
-      finishBaseIfDone(baseId);
     }
+    finishBaseIfDone(baseId);
   }
 
   function onAck(data, conn) {
@@ -815,7 +819,10 @@
       addHistory(`Sent ${state.file.name} (${formatBytes(state.file.size)})`, "send");
       beep("complete");
       const tracker = groupSendTracker.get(state.baseId);
-      if (tracker) tracker.completed.add(conn.peer);
+      if (tracker) {
+        tracker.completed.add(conn.peer);
+        tracker.accepted.delete(conn.peer);
+      }
       sendStates.delete(key);
       finishBaseIfDone(state.baseId);
       return;
@@ -855,14 +862,18 @@
   // When a base file is completely decided and no active streams remain, advance
   function finishBaseIfDone(baseId) {
     const tracker = groupSendTracker.get(baseId);
-    const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
     if (!tracker) {
-      if (currentSend && currentSend.baseId === baseId) { currentSend = null; }
-      processSendQueue();
+      if (currentSend && currentSend.baseId === baseId) {
+          currentSend = null;
+          processSendQueue();
+      }
       return;
     }
-    const decided = tracker.accepted.size + tracker.rejected.size;
-    if (decided === tracker.targets.size && !activeForBase) {
+
+    const activeForBase = Array.from(sendStates.keys()).some(k => k.startsWith(`${baseId}|`));
+    const decidedCount = tracker.completed.size + tracker.rejected.size;
+
+    if (decidedCount >= tracker.targets.size && !activeForBase) {
       currentSend = (currentSend && currentSend.baseId === baseId) ? null : currentSend;
       groupSendTracker.delete(baseId);
       processSendQueue();
@@ -888,6 +899,7 @@
     const tracker = groupSendTracker.get(baseId);
     if (tracker) {
       tracker.rejected.add(peerId);
+      tracker.accepted.delete(peerId);
       // If direct mode, treat as entire send cancellation and finish immediately
       if (connectionMode === "direct") {
         // remove any other UI rows for this baseId
@@ -901,7 +913,7 @@
       }
       // Room mode: continue for others, or finish if everyone decided
       finishBaseIfDone(baseId);
-      } else {
+    } else {
       // No tracker (edge): just proceed
       if (currentSend && currentSend.baseId === baseId) currentSend = null;
       processSendQueue();
@@ -1231,3 +1243,4 @@
 </script>
 </body>
 </html>
+
