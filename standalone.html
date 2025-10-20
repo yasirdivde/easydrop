@@ -1097,7 +1097,694 @@
       updatePeerListUI();
     }
 
-    function updatePeerListUI() {
+        function updatePeerListUI() {
       if (connectionMode !== "room") return;
 
-      let html =
+      let html = `<div class="bg-green-100 text-green-700 font-bold p-3 rounded-xl">
+        ${myDeviceName} ${isHost ? "(Host)" : ""}
+      </div>`;
+
+      const conns = Object.values(connections).filter(Boolean);
+
+      if (!conns.length) {
+        html += `<p class="text-slate-400 text-sm text-center mt-3">You are alone.</p>`;
+      } else {
+        for (const c of conns) {
+          const name = c.metadata?.deviceName || c.peer;
+          const kickBtn = isHost
+            ? `<button class="ml-3 px-2 py-1 text-xs rounded bg-red-100 text-red-700 border border-red-200" data-kick="${c.peer}">
+                 <i class="fas fa-user-slash mr-1"></i>Kick
+               </button>`
+            : "";
+          html += `<div class="flex items-center justify-between bg-slate-50 p-3 rounded-xl">
+            <span class="truncate">${name}</span>
+            <div class="flex items-center">
+              <span class="text-xs text-slate-400 mr-3">${c.peer}</span>
+              ${kickBtn}
+            </div>
+          </div>`;
+        }
+      }
+
+      peerList.innerHTML = html;
+    }
+
+    function showMyIdQr() {
+      qrModalTitle.textContent = "Your Direct ID";
+      qrcodeContainer.innerHTML = "";
+      new QRCode(qrcodeContainer, {
+        text: myPeerId || preferredPeerId,
+        width: 224,
+        height: 224,
+      });
+      qrCodeText.textContent = myPeerId || preferredPeerId;
+      qrModal.classList.add("show");
+    }
+
+    function showRoomQr() {
+      qrModalTitle.textContent = "Room Code";
+      qrcodeContainer.innerHTML = "";
+      new QRCode(qrcodeContainer, { text: roomCode, width: 224, height: 224 });
+      qrCodeText.textContent = roomCode;
+      // Keep open even when peers join
+      qrModal.classList.add("show");
+    }
+
+    function closeQR() {
+      qrModal.classList.remove("show");
+    }
+
+    /* ---------- Queue UI ---------- */
+    function addQueueUI(id, fileName, isSender, initialStatus = null) {
+      if (fileQueue.querySelector("p")) fileQueue.innerHTML = "";
+      const radius = 30;
+      const circumference = 2 * Math.PI * radius;
+      const el = document.createElement("div");
+      el.id = `transfer-${id}`;
+      el.innerHTML = `
+        <div class="bg-slate-50 rounded-2xl p-4 flex items-center gap-4">
+          <div class="relative w-16 h-16 flex-shrink-0">
+            <svg class="w-full h-full" viewBox="0 0 70 70">
+              <circle class="text-slate-200" stroke-width="8" stroke="currentColor" fill="transparent" r="${radius}" cx="35" cy="35"></circle>
+              <circle id="progress-${id}" class="progress-ring__circle text-teal-500" stroke-width="8" stroke-dasharray="${circumference} ${circumference}" stroke-dashoffset="${circumference}" stroke="currentColor" fill="transparent" r="${radius}" cx="35" cy="35"></circle>
+            </svg>
+            <div id="percent-${id}" class="absolute inset-0 flex items-center justify-center font-bold text-sm text-teal-600">0</div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold truncate" title="${fileName}">${fileName}</p>
+            <p id="status-${id}" class="text-sm text-slate-500">${initialStatus ?? (isSender ? "Offering..." : "Waiting...")}</p>
+            <p id="speed-${id}" class="text-sm font-medium text-slate-600 mt-1">0.00 MB/s</p>
+          </div>
+          ${isSender ? `<button id="cancel-${id}" class="btn bg-slate-200 text-slate-600 w-10 h-10 flex-shrink-0 text-lg" title="Cancel"><i class="fas fa-times"></i></button>` : ``}
+        </div>
+      `;
+      fileQueue.appendChild(el);
+      if (isSender) {
+        const btn = document.getElementById(`cancel-${id}`);
+        if (btn) {
+          if (id.startsWith("pending-")) {
+            const baseId = id.replace("pending-", "");
+            btn.addEventListener("click", () => cancelPending(baseId));
+          } else {
+            btn.addEventListener("click", () => cancelTransfer(id));
+          }
+        }
+      }
+    }
+
+    function updateProgressUI(id, progress, speedMBps, status) {
+      const root = document.getElementById(`transfer-${id}`);
+      if (!root) return;
+      if (typeof progress === "number") {
+        const percentEl = document.getElementById(`percent-${id}`);
+        const circle = document.getElementById(`progress-${id}`);
+        const r = circle.r.baseVal.value;
+        const circ = 2 * Math.PI * r;
+        const offset = circ - (Math.round(progress) / 100) * circ;
+        percentEl.textContent = Math.round(progress);
+        circle.style.strokeDashoffset = offset;
+      }
+      if (typeof speedMBps === "number")
+        document.getElementById(`speed-${id}`).textContent = `${speedMBps.toFixed(
+          2
+        )} MB/s`;
+      if (typeof status === "string")
+        document.getElementById(`status-${id}`).textContent = status;
+
+      if (
+        ["Completed!", "Sent!", "Declined", "Error!", "Cancelled"].includes(
+          status
+        )
+      ) {
+        setTimeout(() => {
+          root.remove();
+          if (!fileQueue.children.length) {
+            fileQueue.innerHTML = `<p class="text-slate-400 text-center py-4">No active transfers</p>`;
+          }
+        }, 1200);
+      }
+    }
+
+    function removeQueueItemInstant(id) {
+      const root = document.getElementById(`transfer-${id}`);
+      if (root) root.remove();
+      if (!fileQueue.children.length) {
+        fileQueue.innerHTML = `<p class="text-slate-400 text-center py-4">No active transfers</p>`;
+      }
+    }
+
+    /* ---------- Sending ---------- */
+    function queueFilesForTransfer(fileList) {
+      const files = Array.from(fileList || []);
+      if (!files.length) return;
+      if (!Object.keys(connections).length) {
+        notify("No one is connected!", "warning");
+        return;
+      }
+
+      for (const file of files) {
+        const baseId =
+          Date.now() + "-" + Math.random().toString(36).slice(2);
+        sendQueue.push({ baseId, file });
+        addQueueUI(`pending-${baseId}`, file.name, true, "Waiting...");
+      }
+      if (!currentSend) processSendQueue();
+    }
+
+    function processSendQueue() {
+      if (currentSend || sendQueue.length === 0) return;
+      const next = sendQueue.shift();
+      currentSend = next;
+      removeQueueItemInstant(`pending-${next.baseId}`);
+
+      const recipients =
+        connectionMode === "direct"
+          ? [Object.values(connections)[0]].filter(Boolean)
+          : Object.values(connections);
+
+      groupSendTracker.set(next.baseId, {
+        targets: new Set(recipients.map((c) => c.peer)),
+        accepted: new Set(),
+        rejected: new Set(),
+        completed: new Set(),
+      });
+
+      for (const c of recipients) {
+        const transferKey = getTransferKey(next.baseId, c.peer);
+        addQueueUI(
+          transferKey,
+          next.file.name,
+          true,
+          `Offering to ${c.metadata?.deviceName || c.peer}...`
+        );
+        c.send({
+          type: "file-request",
+          id: next.baseId,
+          name: next.file.name,
+          size: next.file.size,
+          fileType: next.file.type,
+          senderName: myDeviceName,
+        });
+      }
+    }
+
+    function getTransferKey(baseId, peerId) {
+      return `${baseId}::${peerId}`;
+    }
+
+    function onFileAccepted(data, conn) {
+      if (!currentSend || currentSend.baseId !== data.id) return;
+      const tracker = groupSendTracker.get(data.id);
+      if (tracker) tracker.accepted.add(conn.peer);
+
+      const transferKey = getTransferKey(data.id, conn.peer);
+      const totalChunks = Math.ceil(currentSend.file.size / CHUNK_SIZE);
+
+      sendStates.set(transferKey, {
+        baseId: data.id,
+        peerId: conn.peer,
+        file: currentSend.file,
+        conn,
+        start: Date.now(),
+        nextIndex: 0,
+        totalChunks,
+        inFlight: 0,
+        ackedBytes: 0,
+      });
+
+      pumpChunks(transferKey);
+    }
+
+    function onFileRejected(data, conn) {
+      if (!currentSend || currentSend.baseId !== data.id) return;
+      const tracker = groupSendTracker.get(data.id);
+      if (tracker) {
+        tracker.rejected.add(conn.peer);
+        tracker.accepted.delete(conn.peer);
+      }
+      const transferKey = getTransferKey(data.id, conn.peer);
+      updateProgressUI(transferKey, 0, 0, "Declined");
+      finishBaseIfDone(data.id);
+    }
+
+    function onAck(data, conn) {
+      const key = getTransferKey(data.transferId, conn.peer);
+      const state = sendStates.get(key);
+      if (!state) return;
+      state.inFlight = Math.max(0, state.inFlight - 1);
+      // Estimate acked bytes
+      const lastChunk = data.chunkIndex === state.totalChunks - 1;
+      const sizeAck = lastChunk
+        ? state.file.size - CHUNK_SIZE * (state.totalChunks - 1)
+        : CHUNK_SIZE;
+      state.ackedBytes += sizeAck;
+
+      const progress = (state.ackedBytes / state.file.size) * 100;
+      const speed = senderSpeedMBps(state);
+      const status =
+        connectionMode === "direct"
+          ? "Sending..."
+          : `Sending to ${state.conn.metadata?.deviceName || state.peerId}`;
+      updateProgressUI(key, progress, speed, status);
+
+      if (state.ackedBytes >= state.file.size) {
+        updateProgressUI(key, 100, speed, "Sent!");
+        addHistory(
+          `Sent ${state.file.name} (${formatBytes(state.file.size)})`,
+          "send"
+        );
+        beep("complete");
+        const tracker = groupSendTracker.get(state.baseId);
+        if (tracker) {
+          tracker.completed.add(conn.peer);
+          tracker.accepted.delete(conn.peer);
+        }
+        sendStates.delete(key);
+        finishBaseIfDone(state.baseId);
+      } else {
+        pumpChunks(key);
+      }
+    }
+
+    async function pumpChunks(transferKey) {
+      const state = sendStates.get(transferKey);
+      if (!state) return;
+      while (state.inFlight < WINDOW_SIZE && state.nextIndex < state.totalChunks) {
+        const start = state.nextIndex * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, state.file.size);
+        const chunk = await state.file.slice(start, end).arrayBuffer();
+        state.conn.send({
+          type: "file-chunk",
+          payload: chunk,
+          transferId: state.baseId,
+          chunkIndex: state.nextIndex,
+          totalChunks: state.totalChunks,
+          fileType: state.file.type,
+          name: state.file.name,
+          size: state.file.size,
+          senderName: myDeviceName,
+        });
+        state.nextIndex += 1;
+        state.inFlight += 1;
+      }
+    }
+
+    function senderSpeedMBps(state) {
+      const elapsed = Math.max(0.001, (Date.now() - state.start) / 1000);
+      return state.ackedBytes / (1024 * 1024) / elapsed;
+    }
+
+    function finishBaseIfDone(baseId) {
+      const tracker = groupSendTracker.get(baseId);
+      const anyActiveForBase = Array.from(sendStates.keys()).some((k) =>
+        k.startsWith(baseId)
+      );
+      if (!tracker) {
+        if (currentSend && currentSend.baseId === baseId) {
+          currentSend = null;
+          processSendQueue();
+        }
+        return;
+      }
+      const decidedCount = tracker.completed.size + tracker.rejected.size;
+      if (decidedCount >= tracker.targets.size && !anyActiveForBase) {
+        currentSend = null;
+        groupSendTracker.delete(baseId);
+        processSendQueue();
+      }
+    }
+
+    function cancelPending(baseId) {
+      const idx = sendQueue.findIndex((t) => t.baseId === baseId);
+      if (idx !== -1) {
+        sendQueue.splice(idx, 1);
+        removeQueueItemInstant(`pending-${baseId}`);
+      }
+    }
+
+    function cancelTransfer(transferKey) {
+      const [baseId, peerId] = transferKey.split("::");
+      const conn = connections[peerId];
+      if (conn?.open) conn.send({ type: "file-cancel", id: baseId });
+      if (sendStates.has(transferKey)) sendStates.delete(transferKey);
+      updateProgressUI(transferKey, 0, 0, "Cancelled");
+
+      const tracker = groupSendTracker.get(baseId);
+      if (tracker) {
+        tracker.rejected.add(peerId);
+        tracker.accepted.delete(peerId);
+
+        if (connectionMode === "direct") {
+          // remove all rows for this base in direct mode
+          for (const target of tracker.targets)
+            removeQueueItemInstant(getTransferKey(baseId, target));
+          groupSendTracker.delete(baseId);
+          if (currentSend && currentSend.baseId === baseId) {
+            currentSend = null;
+            processSendQueue();
+          }
+          return;
+        }
+        finishBaseIfDone(baseId);
+      } else {
+        if (currentSend && currentSend.baseId === baseId) {
+          currentSend = null;
+          processSendQueue();
+        }
+      }
+    }
+
+    /* ---------- Receiving ---------- */
+    acceptBtn.addEventListener("click", () => {
+      const transferId = fileReceiveModal.dataset.transferId;
+      const p = pendingReceives.get(transferId);
+      if (!p) return;
+      p.conn.send({ type: "file-accepted", id: transferId });
+      addQueueUI(transferId, p.meta.name, false, "Receiving...");
+      fileReceiveModal.classList.remove("show");
+    });
+
+    declineBtn.addEventListener("click", () => {
+      const transferId = fileReceiveModal.dataset.transferId;
+      const p = pendingReceives.get(transferId);
+      if (!p) return;
+      p.conn.send({ type: "file-rejected", id: transferId });
+      pendingReceives.delete(transferId);
+      addHistory(`Declined ${p.meta.name}`, "decline");
+      fileReceiveModal.classList.remove("show");
+    });
+
+    function onFileRequest(meta, conn) {
+      // ignore self echoes
+      if (meta.senderId === (myPeerId || preferredPeerId)) return;
+
+      // If sender cancelled earlier, auto-ignore
+      if (cancelledReceives.has(meta.id)) {
+        return;
+      }
+
+      const iconMap = {
+        jpg: "fa-file-image",
+        jpeg: "fa-file-image",
+        png: "fa-file-image",
+        pdf: "fa-file-pdf",
+        zip: "fa-file-archive",
+        mp4: "fa-file-video",
+        mp3: "fa-file-audio",
+      };
+      const ext = (meta.name.split(".").pop() || "").toLowerCase();
+
+      fileReceiveIcon.className = `fas ${
+        iconMap[ext] || "fa-file"
+      } text-4xl text-green-500`;
+      fileReceiveName.textContent = meta.name;
+      fileReceiveSize.textContent = formatBytes(meta.size);
+      fileReceiveFrom.textContent = `From ${meta.senderName} (${conn.peer})`;
+      fileReceiveSubtext.textContent =
+        connectionMode === "direct"
+          ? "A peer wants to send you a file"
+          : "A peer in the room wants to send a file";
+
+      fileReceiveModal.dataset.transferId = meta.id;
+      fileReceiveModal.dataset.fromPeer = conn.peer;
+      fileReceiveModal.classList.add("show");
+
+      pendingReceives.set(meta.id, {
+        meta,
+        conn,
+        chunks: [],
+        receivedSize: 0,
+        start: Date.now(),
+      });
+    }
+
+    function onFileChunk(data, conn) {
+      const p = pendingReceives.get(data.transferId);
+      if (!p) return; // cancelled already
+      if (cancelledReceives.has(data.transferId)) {
+        return; // sender cancelled; ignore incoming chunks
+      }
+
+      p.chunks[data.chunkIndex] = data.payload;
+      p.receivedSize += data.payload?.byteLength || 0;
+
+      const progress = (p.receivedSize / p.meta.size) * 100;
+      const speedMBps =
+        p.receivedSize / (1024 * 1024) /
+        Math.max(0.001, (Date.now() - p.start) / 1000);
+      updateProgressUI(data.transferId, progress, speedMBps, "Receiving...");
+
+      conn.send({
+        type: "file-ack",
+        transferId: data.transferId,
+        chunkIndex: data.chunkIndex,
+      });
+
+      if (p.receivedSize >= p.meta.size) {
+        try {
+          const ordered = [];
+          for (let i = 0; i < data.totalChunks; i++)
+            ordered.push(new Uint8Array(p.chunks[i]));
+          const blob = new Blob(ordered, {
+            type: data.fileType || "application/octet-stream",
+          });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = data.name || "download";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(a.href);
+
+          updateProgressUI(data.transferId, 100, speedMBps, "Completed!");
+          addHistory(
+            `Received ${data.name} (${formatBytes(p.meta.size)})`,
+            "receive"
+          );
+          beep("complete");
+        } catch (e) {
+          updateProgressUI(data.transferId, 0, 0, "Error!");
+          beep("error");
+        } finally {
+          pendingReceives.delete(data.transferId);
+        }
+      }
+    }
+
+    function onFileCancel(data, conn) {
+      // Sender cancelled; clear immediately on receiver
+      const id = data.id;
+      cancelledReceives.add(id);
+
+      // Close modal if open for this transfer
+      if (fileReceiveModal.dataset.transferId === id) {
+        fileReceiveModal.classList.remove("show");
+      }
+
+      // Remove queue item instantly
+      removeQueueItemInstant(id);
+
+      // Drop pending receive buffers
+      if (pendingReceives.has(id)) pendingReceives.delete(id);
+
+      notify("Sender cancelled transfer.", "warning");
+    }
+
+    /* ---------- Chat ---------- */
+    function sendChatMessage() {
+      const message = chatInput.value.trim();
+      if (!message) return;
+      const payload = { type: "chat-message", content: message, senderName: myDeviceName };
+      if (connectionMode === "direct") {
+        const c = Object.values(connections)[0];
+        c?.send(payload);
+      } else {
+        broadcast(payload);
+      }
+      displayChatMessage({ content: message, senderName: myDeviceName }, true);
+      chatInput.value = "";
+    }
+
+    function displayChatMessage(data, isSent = false) {
+      const box = chatMessages;
+      const wrapper = document.createElement("div");
+      wrapper.className = `flex flex-col ${isSent ? "items-end" : "items-start"}`;
+
+      if (connectionMode === "room" && !isSent) {
+        const name = document.createElement("span");
+        name.className = "text-xs text-slate-500 mb-1 px-2";
+        name.textContent = data.senderName || "Peer";
+        wrapper.appendChild(name);
+      }
+
+      const bubble = document.createElement("div");
+      bubble.className = `p-3 max-w-xs break-words ${
+        isSent ? "chat-bubble-sent" : "chat-bubble-received"
+      }`;
+      bubble.textContent = data.content || "";
+      wrapper.appendChild(bubble);
+      box.appendChild(wrapper);
+      box.scrollTop = box.scrollHeight;
+
+      if (!isSent) beep("info");
+    }
+
+    /* ---------- History ---------- */
+    function addHistory(message, type = "info") {
+      if (!["send", "receive", "decline"].includes(type)) return;
+      const h = sessionHistory;
+      if (h.querySelector("p")) h.innerHTML = "";
+      const icons = {
+        send: "fa-arrow-up text-green-500",
+        receive: "fa-arrow-down text-teal-500",
+        decline: "fa-times text-red-500",
+      };
+      const div = document.createElement("div");
+      div.className = "flex items-center gap-3 p-2 bg-slate-50 rounded-lg";
+      div.innerHTML = `
+        <i class="fas ${icons[type]} w-5 text-center"></i>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm truncate">${message}</p>
+          <p class="text-xs text-slate-400">${new Date().toLocaleTimeString()}</p>
+        </div>`;
+      h.appendChild(div); // append to bottom so history is at the very end
+    }
+
+    /* ---------- QR Scanner ---------- */
+    function openQRScanner(mode) {
+      if (html5QrCode?.isScanning) return;
+      qrScannerMode = mode;
+      qrScanLocked = false;
+      qrScannerTitle.textContent = \`Scan ${
+        mode === "direct" ? "Direct ID" : "Room QR Code"
+      }\`;
+      qrScannerModal.classList.add("show");
+
+      html5QrCode = new Html5Qrcode("qr-reader");
+      html5QrCode
+        .start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: 250 },
+          (decodedText) => {
+            if (qrScanLocked) return;
+            qrScanLocked = true;
+            beep("complete");
+            const isDirectId = decodedText.startsWith("EZ-");
+            if (qrScannerMode === "direct") {
+              if (!isDirectId) {
+                notify("Not a valid Direct ID QR.", "error");
+                setTimeout(() => {
+                  qrScanLocked = false;
+                }, 800);
+                return;
+              }
+              remotePeerIdInput.value = decodedText;
+              closeQRScanner().then(connectDirect);
+            } else {
+              if (isDirectId) {
+                notify("Not a valid Room QR Code.", "error");
+                setTimeout(() => {
+                  qrScanLocked = false;
+                }, 800);
+                return;
+              }
+              roomCodeInput.value = decodedText;
+              joinRoom();
+              // Do not auto-close host's QR modal; only close scanner
+              closeQRScanner();
+            }
+          }
+        )
+        .catch(() => {
+          notify("Could not start camera.", "error");
+          closeQRScanner();
+        });
+    }
+
+    function closeQRScanner() {
+      return new Promise((resolve) => {
+        if (!html5QrCode?.isScanning) {
+          qrScannerModal.classList.remove("show");
+          html5QrCode = null;
+          return resolve();
+        }
+        html5QrCode
+          .stop()
+          .then(() => {
+            html5QrCode
+              .clear()
+              .finally(() => {
+                html5QrCode = null;
+                qrScannerModal.classList.remove("show");
+                resolve();
+              });
+          })
+          .catch(() => {
+            html5QrCode = null;
+            qrScannerModal.classList.remove("show");
+            resolve();
+          });
+      });
+    }
+
+    /* ---------- Host controls ---------- */
+    function kickPeer(peerId) {
+      if (!isHost || connectionMode !== "room") return;
+      if (isSendingActiveForPeer(peerId)) {
+        notify("Cannot kick: user is sending a file.", "warning");
+        return;
+      }
+      const conn = connections[peerId];
+      if (conn?.open) {
+        conn.send({ type: "room-kick", peerId });
+        setTimeout(() => {
+          try { conn.close(); } catch {}
+          delete connections[peerId];
+          updatePeerListUI();
+        }, 150);
+      }
+    }
+
+    function isSendingActive() {
+      // Any active send states or currentSend not null
+      if (currentSend) {
+        // also check if any sendStates exist for its baseId
+        const baseId = currentSend.baseId;
+        const activeForBase = Array.from(sendStates.keys()).some((k) =>
+          k.startsWith(baseId)
+        );
+        if (activeForBase) return true;
+      }
+      return sendStates.size > 0;
+    }
+
+    function isSendingActiveForPeer(peerId) {
+      for (const [key] of sendStates) {
+        if (key.endsWith(`::${peerId}`)) return true;
+      }
+      return false;
+    }
+
+    /* ---------- File receive modal immediate cancel safety ---------- */
+    // Close receive modal if clicking outside content
+    fileReceiveModal.addEventListener("click", (e) => {
+      if (e.target === fileReceiveModal) fileReceiveModal.classList.remove("show");
+    });
+
+    /* ---------- Final ---------- */
+    // Prevent leaving via back button on mobile during active send
+    window.addEventListener("popstate", (e) => {
+      if (isSendingActive()) {
+        history.pushState(null, "", location.href);
+        notify("Cannot leave while a transfer is in progress.", "warning");
+      }
+    });
+
+    // Expose leave function for header back button
+    window.tryLeaveRoom = tryLeaveRoom;
+    window.showRoomQr = showRoomQr;
+
+    // Initialization already called above
+  </script>
+</body>
+</html>
