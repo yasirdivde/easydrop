@@ -318,8 +318,8 @@
   let currentSend = null; // { baseId, file }
 
   // Throughput tuning (larger and pipelined)
-  const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB
-  const WINDOW_SIZE = 12;             // up to 12 inflight
+  const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB
+  const WINDOW_SIZE = 16;             // up to 16 inflight
 
   // Per-recipient send states
   const sendStates = new Map(); // transferKey -> { baseId, peerId, file, conn, start, nextIndex, totalChunks, inFlight, ackedCount, ackedBytes }
@@ -482,6 +482,10 @@
     connectionMode = "direct";
     isHost = false;
     const remoteId = $("remotePeerIdInput").value.trim();
+    if (remoteId && !remoteId.startsWith("EZ-")) {
+        notify("Invalid Direct ID format. Use a Room Code to join rooms.", "error");
+        return;
+    }
     if (!remoteId) { notify("Please enter a Direct ID.", "warning"); return; }
     if (remoteId === (myPeerId || preferredPeerId)) {
       notify("Cannot connect to yourself.", "error"); return;
@@ -506,6 +510,10 @@
   function joinRoom() {
     if (isJoiningRoom) return;
     const code = $("roomCodeInput").value.trim().toUpperCase();
+    if (code && code.startsWith("EZ-")) {
+        notify("Invalid Room Code. Use a Direct ID for P2P connections.", "error");
+        return;
+    }
     if (!code) { notify("Please enter a room code.", "warning"); return; }
     connectionMode = "room";
     isHost = false;
@@ -609,7 +617,6 @@
 
   // ---------- UI: transfer window ----------
   function showTransferWindow() {
-    // *** FIX: Only close QR modal if not a room host, allowing multiple joins ***
     if (!isHost) {
       closeQR();
     }
@@ -1024,8 +1031,8 @@
       }
       pendingReceives.delete(id);
     }
-    removeQueueItemInstant(id);
     notify("Sender cancelled the transfer.", "warning");
+    updateProgressUI(id, undefined, undefined, "Cancelled");
   }
 
   // ---------- Queue UI ----------
