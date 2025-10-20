@@ -531,6 +531,10 @@
     conn.on("open", () => {
       connections[conn.peer] = conn;
       conn.send({ type: "metadata-sync", deviceName: myDeviceName, mode: connectionMode, roomCode });
+      
+      // *** FIX: Close the scanner modal on any successful connection ***
+      closeQRScanner();
+
       showTransferWindow();
       updatePeerListUI();
     });
