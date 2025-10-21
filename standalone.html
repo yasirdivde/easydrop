@@ -191,27 +191,40 @@
     <!-- Home Screen -->
     <div id="homeScreen" class="app-screen active p-4 md:p-6">
       <div class="text-center mb-8">
-        <i class="fas fa-paper-plane text-5xl text-teal-500"></i>
-        <h1 class="text-4xl font-bold text-slate-800 mt-2">EasyDrop</h1>
-        <p class="text-slate-500">Simple, secure peer-to-peer file sharing</p>
-      </div>
+    <!-- Replace icon & text with image -->
+    <img src="logo.jpg" alt="EasyDrop Logo" 
+         class="mx-auto w-32 md:w-48 lg:w-56 h-auto">
+  </div>
+<div class="bg-white rounded-3xl shadow-lg p-4 md:p-5 flex items-center justify-center gap-6 max-w-3xl mx-auto mb-6">
+  
+  <!-- Avatar -->
+  <div class="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+    <i class="fas fa-user text-4xl text-green-500"></i>
+  </div>
 
-      <div class="bg-white rounded-3xl shadow-lg p-6 max-w-md mx-auto mb-8">
-        <div class="w-24 h-24 rounded-full bg-green-100 flex items-center justify-center mb-4 mx-auto">
-          <i class="fas fa-user text-5xl text-green-500"></i>
-        </div>
+  <!-- Center Section: Name + Status -->
+  <div class="flex flex-col items-center justify-center gap-2 text-center">
+    <!-- Row 1: Name + Save -->
+    <div class="flex items-center gap-2 justify-center flex-wrap">
+      <input id="deviceNameInput" type="text"
+        class="text-lg font-bold text-center bg-transparent focus:bg-slate-100 rounded-lg p-2 outline-none w-40 sm:w-48"
+        value="Device-XXXX" />
+      <button id="saveNameBtn" title="Save Name"
+        class="btn bg-green-500 text-white rounded-full p-2 flex items-center justify-center">
+        <i class="fas fa-check"></i>
+      </button>
+    </div>
 
-        <div class="flex items-center gap-2 justify-center flex-wrap sm:flex-nowrap">
-          <input id="deviceNameInput" type="text" class="text-xl font-bold text-center bg-transparent focus:bg-slate-100 rounded-lg p-2 outline-none min-w-[12rem]" value="Device-XXXX" />
-          <button id="saveNameBtn" title="Save Name" class="btn bg-green-500 text-white rounded-full save-name-btn flex items-center justify-center flex-shrink-0">
-            <i class="fas fa-check"></i>
-          </button>
-        </div>
+    <!-- Row 2: Connection Status -->
+    <div id="connectionStatus"
+      class="bg-slate-100 text-slate-600 font-medium py-1 px-3 rounded-full inline-flex items-center gap-2 text-sm">
+      <i class="fas fa-circle text-gray-400"></i> <span>Waiting...</span>
+    </div>
+  </div>
 
-        <div id="connectionStatus" class="mt-4 bg-slate-100 text-slate-600 font-medium py-1 px-3 rounded-full inline-flex items-center gap-2 text-sm">
-          <i class="fas fa-circle text-gray-400"></i> <span>Waiting...</span>
-        </div>
-      </div>
+</div>
+
+
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl mx-auto">
         <!-- Direct -->
