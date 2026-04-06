@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScreenStream | Professional Screen Sharing</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                        },
+                        slate: {
+                            850: '#151e2e',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.4s ease-out forwards',
+                        'slide-up': 'slideUp 0.3s ease-out forwards',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(10px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- PeerJS for WebRTC Signaling -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+    <style>
+        /* Import Google Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        /* Custom scrollbar for a polished look */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8; 
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* Very light slate */
+        }
+
+        .view-section {
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+        
+        .view-section.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col overflow-x-hidden">
+
+    <!-- Navbar -->
+    <nav class="bg-white border-b border-slate-200 shadow-sm py-3 px-6 flex justify-between items-center z-10 sticky top-0">
+        <div class="flex items-center gap-3 cursor-pointer group" onclick="resetToHome()">
+            <div class="bg-primary-50 text-primary-600 p-2.5 rounded-lg flex items-center justify-center group-hover:bg-primary-100 transition-colors">
+                <i class="fa-solid fa-display text-lg"></i>
+            </div>
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight">ScreenStream</h1>
+        </div>
+        <div class="text-slate-500 font-medium text-sm hidden sm:flex items-center gap-4">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-lock text-slate-400"></i> Secure P2P</span>
+            <span class="text-slate-300">|</span>
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-bolt text-yellow-400"></i> Low Latency</span>
+        </div>
+    </nav>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow flex items-center justify-center p-4 sm:p-8 w-full max-w-6xl mx-auto relative">
+        
+        <!-- 1. HOME VIEW (Initial State) -->
+        <div id="view-home" class="view-section active flex-col items-center justify-center text-center max-w-lg w-full py-12 animate-fade-in">
+            <div class="bg-white p-8 sm:p-10 rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/50 relative overflow-hidden">
+                <!-- Decorative background shape -->
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-primary-50 rounded-full blur-2xl opacity-70 pointer-events-none"></div>
+                
+                <div class="relative z-10">
+                    <div class="w-16 h-16 bg-primary-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-primary-600 text-2xl shadow-sm border border-primary-100">
+                        <i class="fa-solid fa-tower-broadcast"></i>
+                    </div>
+                    <h2 class="text-3xl font-bold mb-4 text-slate-900 tracking-tight">Present Your Screen</h2>
+                    <p class="text-slate-500 mb-8 leading-relaxed">Instantly share your screen with clients, colleagues, or students. No software installation required—just share a link.</p>
+                    
+                    <button id="btn-start-sharing" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-3.5 px-6 rounded-xl transition-all shadow-md shadow-primary-600/20 flex items-center justify-center gap-2.5 text-lg">
+                        <i class="fa-solid fa-video text-sm"></i>
+                        Start Sharing Session
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex items-center justify-center gap-6 text-sm text-slate-500 mt-8 font-medium">
+                <span class="flex items-center gap-1.5"><i class="fa-solid fa-check text-emerald-500"></i> No Sign-up</span>
+                <span class="flex items-center gap-1.5"><i class="fa-solid fa-check text-emerald-500"></i> End-to-End WebRTC</span>
+            </div>
+        </div>
+
+        <!-- 2. SENDER VIEW (Host sharing their screen) -->
+        <div id="view-sender" class="view-section flex-col w-full h-full max-h-[850px] animate-slide-up">
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col h-full">
+                
+                <!-- Header / Controls -->
+                <div class="p-5 sm:p-6 border-b border-slate-200 bg-white flex flex-col sm:flex-row gap-5 justify-between items-start sm:items-center">
+                    <div class="flex-1 w-full max-w-xl">
+                        <label class="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Viewer Invitation Link</label>
+                        <div class="flex relative w-full shadow-sm">
+                            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                                <i class="fa-solid fa-link text-slate-400"></i>
+                            </div>
+                            <input type="text" id="share-url" readonly class="focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full pl-10 sm:text-sm border-slate-300 bg-slate-50 rounded-l-lg text-slate-700 py-2.5 transition-shadow" value="Generating secure link...">
+                            <button id="btn-copy-link" class="inline-flex items-center px-5 py-2.5 border border-transparent text-sm font-medium rounded-r-lg text-white bg-primary-600 hover:bg-primary-700 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 shadow-sm">
+                                <i class="fa-regular fa-copy mr-2"></i> Copy Link
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 sm:self-end items-center">
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5 flex items-center gap-2.5 shadow-sm">
+                            <span class="relative flex h-2.5 w-2.5">
+                                <span id="viewer-ping" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 hidden"></span>
+                                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                            </span>
+                            <span class="text-sm font-semibold text-slate-700"><span id="viewer-count">0</span> Viewers Connected</span>
+                        </div>
+                        <button id="btn-stop-sharing" class="bg-white hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center gap-2 shadow-sm">
+                            <i class="fa-solid fa-stop text-sm"></i>
+                            <span class="hidden sm:inline">End Session</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Video Preview -->
+                <div class="flex-grow bg-slate-850 relative flex items-center justify-center p-4">
+                    <video id="sender-video" class="w-full h-full object-contain rounded-lg shadow-2xl" autoplay muted playsinline></video>
+                    
+                    <!-- Overlay loading state -->
+                    <div id="sender-loading" class="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center z-10 transition-opacity">
+                        <i class="fa-solid fa-circle-notch fa-spin text-4xl text-primary-600 mb-4"></i>
+                        <h3 class="text-xl font-bold text-slate-900 mb-1">Initializing Secure Stream</h3>
+                        <p class="text-slate-500 font-medium">Please grant screen recording permissions...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. JOIN VIEW (Viewer landing page) -->
+        <div id="view-join" class="view-section flex-col items-center justify-center text-center max-w-md w-full animate-fade-in">
+            <div class="bg-white p-8 sm:p-10 rounded-2xl border border-slate-200 shadow-xl shadow-slate-200/50 w-full relative overflow-hidden">
+                <!-- Decorative background shape -->
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-primary-50 rounded-full blur-2xl opacity-70 pointer-events-none"></div>
+
+                <div class="relative z-10">
+                    <div class="w-16 h-16 bg-primary-50 rounded-2xl flex items-center justify-center mx-auto mb-6 text-primary-600 border border-primary-100 shadow-sm">
+                        <i class="fa-solid fa-eye text-2xl"></i>
+                    </div>
+                    <h2 class="text-2xl font-bold mb-3 text-slate-900">Join Screen Share</h2>
+                    <p class="text-slate-500 mb-8 leading-relaxed">You've been invited to view a live presentation. Click below to establish a secure peer-to-peer connection.</p>
+                    
+                    <button id="btn-join-stream" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-3.5 px-4 rounded-xl transition-all shadow-md shadow-primary-600/20 flex items-center justify-center gap-2.5 text-lg">
+                        <i class="fa-solid fa-plug text-sm"></i>
+                        Connect to Stream
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 4. WATCH VIEW (Viewer watching the stream) -->
+        <div id="view-watch" class="view-section flex-col w-full h-[80vh] sm:h-[85vh] relative group animate-slide-up">
+            
+            <!-- Floating Controls -->
+            <div class="absolute top-4 left-4 right-4 flex justify-between items-start z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <div class="bg-white/95 backdrop-blur-md text-slate-800 px-3.5 py-2 rounded-lg border border-slate-200 flex items-center gap-2.5 text-sm font-semibold shadow-lg">
+                    <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                    Live Stream
+                </div>
+                <button id="btn-leave-stream" class="bg-white/95 backdrop-blur-md hover:bg-red-50 text-slate-700 hover:text-red-600 border border-slate-200 hover:border-red-200 px-4 py-2 rounded-lg transition-all shadow-lg text-sm font-semibold flex items-center gap-2">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                    Leave
+                </button>
+            </div>
+
+            <!-- The video player area is dark to provide better contrast for screen sharing -->
+            <div class="w-full h-full bg-slate-850 rounded-2xl overflow-hidden border border-slate-200 shadow-2xl relative">
+                <video id="viewer-video" class="w-full h-full object-contain" autoplay playsinline></video>
+                
+                <!-- Viewer Loading Overlay -->
+                <div id="viewer-loading" class="absolute inset-0 bg-white/95 flex flex-col items-center justify-center z-10">
+                    <i class="fa-solid fa-circle-notch fa-spin text-4xl text-primary-600 mb-4"></i>
+                    <h3 class="text-xl font-bold text-slate-900 mb-1" id="viewer-status">Connecting to Host</h3>
+                    <p class="text-slate-500 font-medium">Establishing secure WebRTC connection...</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
+
+    <!-- Application Logic -->
+    <script>
+        // App State
+        const state = {
+            peer: null,
+            localStream: null,
+            peerId: null,
+            hostId: null,
+            activeConnections: {}, 
+            activeCalls: {},       
+            isHost: false
+        };
+
+        // DOM Elements
+        const views = {
+            home: document.getElementById('view-home'),
+            sender: document.getElementById('view-sender'),
+            join: document.getElementById('view-join'),
+            watch: document.getElementById('view-watch')
+        };
+        const elements = {
+            shareUrl: document.getElementById('share-url'),
+            senderVideo: document.getElementById('sender-video'),
+            viewerVideo: document.getElementById('viewer-video'),
+            viewerCount: document.getElementById('viewer-count'),
+            viewerPing: document.getElementById('viewer-ping'),
+            senderLoading: document.getElementById('sender-loading'),
+            viewerLoading: document.getElementById('viewer-loading'),
+            viewerStatus: document.getElementById('viewer-status')
+        };
+
+        // PeerJS Configuration with public STUN servers for NAT traversal
+        const peerConfig = {
+            config: {
+                'iceServers': [
+                    { url: 'stun:stun.l.google.com:19302' },
+                    { url: 'stun:stun1.l.google.com:19302' }
+                ]
+            },
+            debug: 2 
+        };
+
+        // --- Core Functions ---
+
+        function showView(viewName) {
+            Object.values(views).forEach(v => v.classList.remove('active'));
+            views[viewName].classList.add('active');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let bgClass = 'bg-white border-slate-200 text-slate-800';
+            let icon = '<i class="fa-solid fa-circle-info text-primary-500"></i>';
+            
+            if (type === 'success') {
+                icon = '<i class="fa-solid fa-circle-check text-emerald-500"></i>';
+            } else if (type === 'error') {
+                bgClass = 'bg-white border-red-200 text-slate-800';
+                icon = '<i class="fa-solid fa-circle-exclamation text-red-500"></i>';
+            }
+
+            toast.className = `flex items-center gap-3 px-4 py-3.5 rounded-xl border shadow-xl transform transition-all duration-300 translate-y-10 opacity-0 ${bgClass}`;
+            toast.innerHTML = `<div class="text-lg flex-shrink-0">${icon}</div> <span class="font-medium text-sm leading-tight">${message}</span>`;
+            
+            container.appendChild(toast);
+            
+            // Animate in
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            });
+
+            // Animate out
+            setTimeout(() => {
+                toast.classList.add('translate-y-10', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // --- Host (Sender) Logic ---
+
+        async function startSharing() {
+            // FIX: Check if getDisplayMedia is supported in the current environment
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                showToast("Screen sharing requires a secure context (HTTPS/localhost) and a supported browser.", "error");
+                console.error("navigator.mediaDevices.getDisplayMedia is not available. Ensure you are using HTTPS.");
+                return;
+            }
+
+            try {
+                // 1. Get Screen Media
+                state.localStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: true 
+                });
+
+                state.isHost = true;
+                showView('sender');
+                elements.senderLoading.classList.remove('hidden');
+
+                // Bind stream to local preview (mute to avoid feedback)
+                elements.senderVideo.srcObject = state.localStream;
+                elements.senderVideo.muted = true;
+
+                // Handle system stop sharing button
+                state.localStream.getVideoTracks()[0].onended = () => {
+                    stopSharing("You ended the screen share.");
+                };
+
+                // 2. Initialize WebRTC Signaling via PeerJS
+                state.peer = new Peer(peerConfig);
+
+                state.peer.on('open', (id) => {
+                    state.peerId = id;
+                    const link = `${window.location.origin}${window.location.pathname}?room=${id}`;
+                    elements.shareUrl.value = link;
+                    elements.senderLoading.classList.add('hidden');
+                    showToast('Session active! Viewer link generated.', 'success');
+                });
+
+                // 3. Listen for Viewer Connections
+                state.peer.on('connection', (conn) => {
+                    state.activeConnections[conn.peer] = conn;
+                    updateViewerCount();
+
+                    // Call the viewer and send the stream
+                    const call = state.peer.call(conn.peer, state.localStream);
+                    state.activeCalls[conn.peer] = call;
+
+                    // Handle viewer disconnect
+                    conn.on('close', () => removeViewer(conn.peer));
+                    call.on('close', () => removeViewer(conn.peer));
+                    conn.on('error', () => removeViewer(conn.peer));
+                });
+
+                state.peer.on('error', (err) => {
+                    console.error('PeerJS error:', err);
+                    elements.senderLoading.classList.add('hidden');
+                    showToast(`Signaling error: ${err.type}`, 'error');
+                });
+
+            } catch (err) {
+                console.error("Error accessing display media.", err);
+                if (err.name === 'NotAllowedError') {
+                    showToast('Screen sharing permission was denied.', 'error');
+                } else if (err.name === 'NotFoundError') {
+                    showToast('No screen found to share.', 'error');
+                } else {
+                    showToast('Could not start screen sharing.', 'error');
+                }
+                resetToHome();
+            }
+        }
+
+        function removeViewer(peerId) {
+            if (state.activeConnections[peerId]) {
+                state.activeConnections[peerId].close();
+                delete state.activeConnections[peerId];
+            }
+            if (state.activeCalls[peerId]) {
+                state.activeCalls[peerId].close();
+                delete state.activeCalls[peerId];
+            }
+            updateViewerCount();
+        }
+
+        function updateViewerCount() {
+            const count = Object.keys(state.activeConnections).length;
+            elements.viewerCount.innerText = count;
+            
+            // Ping animation
+            elements.viewerPing.classList.remove('hidden');
+            setTimeout(() => elements.viewerPing.classList.add('hidden'), 1000);
+            
+            if (count > 0 && count > (state.lastCount || 0)) {
+                showToast('A new viewer joined the session', 'success');
+            }
+            state.lastCount = count;
+        }
+
+        function stopSharing(msg = "Session ended successfully.") {
+            // Stop media tracks
+            if (state.localStream) {
+                state.localStream.getTracks().forEach(track => track.stop());
+                state.localStream = null;
+            }
+            
+            // Close all connections
+            Object.values(state.activeConnections).forEach(conn => conn.close());
+            Object.values(state.activeCalls).forEach(call => call.close());
+            
+            state.activeConnections = {};
+            state.activeCalls = {};
+            state.lastCount = 0;
+            
+            // Destroy peer
+            if (state.peer) {
+                state.peer.destroy();
+                state.peer = null;
+            }
+
+            state.isHost = false;
+            showToast(msg, 'info');
+            resetToHome();
+        }
+
+        // --- Viewer Logic ---
+
+        function initJoinScreen(hostId) {
+            state.hostId = hostId;
+            showView('join');
+        }
+
+        function joinStream() {
+            showView('watch');
+            elements.viewerLoading.classList.remove('hidden');
+            elements.viewerStatus.innerText = "Contacting Signaling Server...";
+
+            state.peer = new Peer(peerConfig);
+
+            state.peer.on('open', (id) => {
+                elements.viewerStatus.innerText = "Connecting to Host...";
+                state.peerId = id;
+                
+                // 1. Establish Data Connection to Host
+                const conn = state.peer.connect(state.hostId, { reliable: true });
+                
+                conn.on('open', () => {
+                    elements.viewerStatus.innerText = "Awaiting Video Stream...";
+                });
+
+                conn.on('close', () => {
+                    showToast('The host has ended the presentation.', 'info');
+                    leaveStream();
+                });
+
+                state.activeConnections[state.hostId] = conn;
+            });
+
+            // 2. Receive the Call (Stream) from Host
+            state.peer.on('call', (call) => {
+                call.answer(); // Answer without sending a stream back
+                
+                call.on('stream', (remoteStream) => {
+                    elements.viewerLoading.classList.add('hidden');
+                    elements.viewerVideo.srcObject = remoteStream;
+                    
+                    elements.viewerVideo.play().catch(e => {
+                        console.warn("Autoplay blocked:", e);
+                        elements.viewerVideo.muted = true;
+                        elements.viewerVideo.play();
+                        showToast('Audio muted by browser policy. Click the video to unmute.', 'info');
+                    });
+                });
+
+                call.on('close', () => {
+                    showToast('Host stopped sharing their screen.', 'info');
+                    leaveStream();
+                });
+            });
+
+            state.peer.on('error', (err) => {
+                console.error('Viewer PeerJS error:', err);
+                if (err.type === 'peer-unavailable') {
+                    showToast('Host is unavailable. The session may have ended.', 'error');
+                    leaveStream();
+                } else {
+                    elements.viewerStatus.innerText = "Connection Failed";
+                    showToast(`Connection error: ${err.type}`, 'error');
+                }
+            });
+        }
+
+        function leaveStream() {
+            if (state.peer) {
+                state.peer.destroy();
+                state.peer = null;
+            }
+            if (elements.viewerVideo.srcObject) {
+                elements.viewerVideo.srcObject.getTracks().forEach(t => t.stop());
+                elements.viewerVideo.srcObject = null;
+            }
+            // Remove URL parameter
+            window.history.replaceState({}, document.title, window.location.pathname);
+            resetToHome();
+        }
+
+        // --- General App Control ---
+
+        function resetToHome() {
+            if (state.isHost) {
+                stopSharing();
+                return;
+            }
+            if (state.peer) {
+                leaveStream();
+                return;
+            }
+            window.history.replaceState({}, document.title, window.location.pathname);
+            showView('home');
+        }
+
+        // --- Event Listeners ---
+
+        document.getElementById('btn-start-sharing').addEventListener('click', startSharing);
+        
+        document.getElementById('btn-stop-sharing').addEventListener('click', () => {
+            stopSharing("Screen sharing session ended.");
+        });
+
+        document.getElementById('btn-join-stream').addEventListener('click', joinStream);
+
+        document.getElementById('btn-leave-stream').addEventListener('click', () => {
+            leaveStream();
+            showToast("You left the stream.");
+        });
+
+        document.getElementById('btn-copy-link').addEventListener('click', () => {
+            const input = elements.shareUrl;
+            input.select();
+            input.setSelectionRange(0, 99999); 
+
+            navigator.clipboard.writeText(input.value).then(() => {
+                showToast('Invitation link copied to clipboard!', 'success');
+            }).catch(() => {
+                document.execCommand('copy');
+                showToast('Invitation link copied to clipboard!', 'success');
+            });
+        });
+
+        // Unmute video on click
+        elements.viewerVideo.addEventListener('click', () => {
+            if (elements.viewerVideo.muted) {
+                elements.viewerVideo.muted = false;
+                showToast('Audio unmuted', 'success');
+            }
+        });
+
+        // --- Initialization ---
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomToJoin = urlParams.get('room');
+
+            if (roomToJoin) {
+                initJoinScreen(roomToJoin);
+            } else {
+                showView('home');
+            }
+        });
+
+        // Handle page close
+        window.addEventListener('beforeunload', () => {
+            if (state.isHost) stopSharing();
+            else if (state.peer) leaveStream();
+        });
+
+    </script>
+</body>
+</html>
+
+
